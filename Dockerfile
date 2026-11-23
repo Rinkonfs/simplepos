@@ -12,4 +12,4 @@ COPY . .
 
 RUN composer install --optimize-autoloader --no-interaction --no-dev
 
-CMD php artisan migrate --force && php artisan storage:link && php artisan serve --host=0.0.0.0 --port=${PORT:-8000}
+CMD php artisan migrate --force && (php artisan storage:link || true) && php artisan db:seed --class=UserSeeder --force && php artisan serve --host=0.0.0.0 --port=${PORT:-8000}
