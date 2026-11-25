@@ -14,7 +14,7 @@ class OrderController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Order::with(['items.product:id,name,sku,image_url', 'user:id,name,email,phone'])->latest();
+        $query = Order::with(['items.product:id,name,sku,unit,image_url', 'user:id,name,email,phone'])->latest();
 
         if ($request->user()->role === 'customer') {
             $query->where('user_id', $request->user()->id);
@@ -39,7 +39,7 @@ class OrderController extends Controller
             'customer_name' => 'nullable|string|max:255',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.quantity' => 'required|numeric|min:0.01',
             'items.*.unit_price' => 'nullable|numeric|min:0',
         ]);
 
@@ -71,15 +71,24 @@ class OrderController extends Controller
 
             foreach ($request->items as $item) {
                 $product = Product::lockForUpdate()->findOrFail($item['product_id']);
-                if ($product->stock_qty < $item['quantity']) {
+                $qty = (float) $item['quantity'];
+
+                if ($product->max_purchase_qty && $qty > (float) $product->max_purchase_qty) {
+                    abort(422, "Max purchase limit for {$product->name} is {$product->max_purchase_qty} {$product->unit}");
+                }
+                if ($product->stock_qty < $qty) {
                     abort(422, "Insufficient stock for {$product->name}");
                 }
 
-                $unitPrice = ($isStaff && isset($item['unit_price']))
-                    ? (float) $item['unit_price']
+                $basePrice = ($product->bulk_min_qty && $product->bulk_price && $qty >= (float) $product->bulk_min_qty)
+                    ? (float) $product->bulk_price
                     : (float) $product->sell_price;
 
-                $subtotal = $unitPrice * $item['quantity'];
+                $unitPrice = ($isStaff && isset($item['unit_price']))
+                    ? (float) $item['unit_price']
+                    : $basePrice;
+
+                $subtotal = round($unitPrice * $qty, 2);
                 $subtotalSum += $subtotal;
 
                 if ($product->category_id) {
@@ -88,18 +97,18 @@ class OrderController extends Controller
 
                 $order->items()->create([
                     'product_id' => $product->id,
-                    'quantity' => $item['quantity'],
+                    'quantity' => $qty,
                     'unit_price' => $unitPrice,
                     'subtotal' => $subtotal,
                 ]);
 
-                $product->decrement('stock_qty', $item['quantity']);
+                $product->decrement('stock_qty', $qty);
 
                 StockMovement::create([
                     'product_id' => $product->id,
                     'user_id' => $request->user()->id,
                     'type' => 'out',
-                    'quantity' => $item['quantity'],
+                    'quantity' => $qty,
                     'reference' => "Order #{$order->order_number}",
                 ]);
             }
@@ -169,7 +178,7 @@ class OrderController extends Controller
             'status' => $isCustomer ? 'nullable' : 'required|in:pending,accepted,completed,rejected',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.quantity' => 'required|numeric|min:0.01',
         ]);
 
         return DB::transaction(function () use ($request, $order, $isCustomer) {
@@ -188,25 +197,35 @@ class OrderController extends Controller
             $subtotalSum = 0;
             foreach ($request->items as $item) {
                 $product = Product::lockForUpdate()->findOrFail($item['product_id']);
-                if ($product->stock_qty < $item['quantity']) {
+                $qty = (float) $item['quantity'];
+
+                if ($product->max_purchase_qty && $qty > (float) $product->max_purchase_qty) {
+                    abort(422, "Max purchase limit for {$product->name} is {$product->max_purchase_qty} {$product->unit}");
+                }
+                if ($product->stock_qty < $qty) {
                     abort(422, "Insufficient stock for {$product->name}");
                 }
-                $subtotal = $product->sell_price * $item['quantity'];
+
+                $unitPrice = ($product->bulk_min_qty && $product->bulk_price && $qty >= (float) $product->bulk_min_qty)
+                    ? (float) $product->bulk_price
+                    : (float) $product->sell_price;
+
+                $subtotal = round($unitPrice * $qty, 2);
                 $subtotalSum += $subtotal;
 
                 $order->items()->create([
                     'product_id' => $product->id,
-                    'quantity' => $item['quantity'],
-                    'unit_price' => $product->sell_price,
+                    'quantity' => $qty,
+                    'unit_price' => $unitPrice,
                     'subtotal' => $subtotal,
                 ]);
 
-                $product->decrement('stock_qty', $item['quantity']);
+                $product->decrement('stock_qty', $qty);
                 StockMovement::create([
                     'product_id' => $product->id,
                     'user_id' => $request->user()->id,
                     'type' => 'out',
-                    'quantity' => $item['quantity'],
+                    'quantity' => $qty,
                     'reference' => "Order Edit #{$order->order_number}",
                 ]);
             }
@@ -249,16 +268,15 @@ class OrderController extends Controller
             return response()->json($order->load(['items.product', 'user']));
         });
     }
+
     public function cancel(Request $request, Order $order)
     {
         if ($request->user()->role === 'customer' && (int) $order->user_id !== (int) $request->user()->id) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
-
         if ($order->status === 'completed') {
             return response()->json(['message' => 'Delivered orders cannot be cancelled'], 422);
         }
-
         if (!in_array($order->status, ['pending', 'accepted'])) {
             return response()->json(['message' => 'Order cannot be cancelled'], 422);
         }

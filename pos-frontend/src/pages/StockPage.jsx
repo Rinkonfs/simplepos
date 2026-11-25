@@ -29,7 +29,7 @@ export default function StockPage({ user }) {
     const [editingLog, setEditingLog] = useState(null);
 
     const [search, setSearch] = useState("");
-    const [photoFilter, setPhotoFilter] = useState("all"); // all | with | without
+    const [photoFilter, setPhotoFilter] = useState("all");
     const [editingId, setEditingId] = useState(null);
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [batchForm, setBatchForm] = useState({
@@ -44,10 +44,14 @@ export default function StockPage({ user }) {
         vendor_id: "",
         sku: "",
         name: "",
+        unit: "pcs",
         cost_price: "",
         sell_price: "",
         stock_qty: "",
         low_stock_alert: 5,
+        max_purchase_qty: "",
+        bulk_min_qty: "",
+        bulk_price: "",
         image: null,
     });
     const [file, setFile] = useState(null);
@@ -80,10 +84,14 @@ export default function StockPage({ user }) {
             vendor_id: p.vendor_id || "",
             sku: p.sku,
             name: p.name,
+            unit: p.unit || "pcs",
             cost_price: p.cost_price,
             sell_price: p.sell_price,
             stock_qty: "",
             low_stock_alert: p.low_stock_alert,
+            max_purchase_qty: p.max_purchase_qty || "",
+            bulk_min_qty: p.bulk_min_qty || "",
+            bulk_price: p.bulk_price || "",
             image: null,
         });
     };
@@ -95,10 +103,14 @@ export default function StockPage({ user }) {
             vendor_id: "",
             sku: "",
             name: "",
+            unit: "pcs",
             cost_price: "",
             sell_price: "",
             stock_qty: "",
             low_stock_alert: 5,
+            max_purchase_qty: "",
+            bulk_min_qty: "",
+            bulk_price: "",
             image: null,
         });
     };
@@ -158,15 +170,22 @@ export default function StockPage({ user }) {
     const handleBulkUpload = async (e) => {
         e.preventDefault();
         if (!file) return;
-        const fd = new FormData();
-        fd.append("file", file);
-        await api.post("/products/bulk-upload", fd, {
-            headers: { "Content-Type": "multipart/form-data" },
-        });
-        setFile(null);
-        setMessage({ text: "Bulk CSV/Excel imported!", type: "success" });
-        fetchProducts(true);
-        fetchCategories(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            await api.post("/products/bulk-upload", fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            setFile(null);
+            setMessage({ text: "Bulk CSV/Excel imported!", type: "success" });
+            fetchProducts(true);
+            fetchCategories(true);
+        } catch (err) {
+            setMessage({
+                text: err.response?.data?.message || "Bulk upload failed",
+                type: "error",
+            });
+        }
     };
 
     const filteredProducts = products.filter((p) => {
@@ -333,6 +352,7 @@ export default function StockPage({ user }) {
                                 </select>
                                 <input
                                     type="number"
+                                    step="0.01"
                                     value={editingLog.quantity}
                                     onChange={(e) =>
                                         setEditingLog({
@@ -376,7 +396,7 @@ export default function StockPage({ user }) {
                 <>
                     {message.text && (
                         <div
-                            className={`p-3 rounded-xl text-sm border ${message.type === "error" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}
+                            className={`p-3 rounded-xl text-sm border ${message.type === "error" ? "bg-red-50 text-red-700 border-red-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}
                         >
                             {message.text}
                         </div>
@@ -472,7 +492,7 @@ export default function StockPage({ user }) {
                                                         {m.sku}
                                                     </span>{" "}
                                                     — {m.name} (Stock:{" "}
-                                                    {m.stock_qty})
+                                                    {m.stock_qty} {m.unit})
                                                 </button>
                                             ))}
                                         </div>
@@ -488,8 +508,28 @@ export default function StockPage({ user }) {
                                             name: e.target.value,
                                         })
                                     }
-                                    className="p-2.5 border rounded-xl text-sm bg-slate-50 sm:col-span-2"
+                                    className="p-2.5 border rounded-xl text-sm bg-slate-50"
                                 />
+                                <select
+                                    value={form.unit}
+                                    onChange={(e) =>
+                                        setForm({
+                                            ...form,
+                                            unit: e.target.value,
+                                        })
+                                    }
+                                    className="p-2.5 border rounded-xl text-sm bg-slate-50"
+                                >
+                                    <option value="pcs">
+                                        Unit: Pieces (pcs)
+                                    </option>
+                                    <option value="kg">
+                                        Unit: Kilograms (kg)
+                                    </option>
+                                    <option value="liter">
+                                        Unit: Liters (liter)
+                                    </option>
+                                </select>
                                 <input
                                     required
                                     type="number"
@@ -521,6 +561,7 @@ export default function StockPage({ user }) {
                                 <input
                                     required
                                     type="number"
+                                    step="0.01"
                                     placeholder={
                                         editingId
                                             ? "Stock Qty"
@@ -537,6 +578,7 @@ export default function StockPage({ user }) {
                                 />
                                 <input
                                     type="number"
+                                    step="0.01"
                                     placeholder={t("low_stock_alert")}
                                     value={form.low_stock_alert}
                                     onChange={(e) =>
@@ -547,6 +589,47 @@ export default function StockPage({ user }) {
                                     }
                                     className="p-2.5 border rounded-xl text-sm bg-slate-50"
                                 />
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    placeholder="Max Qty / Purchase (optional)"
+                                    value={form.max_purchase_qty}
+                                    onChange={(e) =>
+                                        setForm({
+                                            ...form,
+                                            max_purchase_qty: e.target.value,
+                                        })
+                                    }
+                                    className="p-2.5 border rounded-xl text-sm bg-slate-50"
+                                />
+                                <div className="grid grid-cols-2 gap-2">
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        placeholder="Bulk Min Qty"
+                                        value={form.bulk_min_qty}
+                                        onChange={(e) =>
+                                            setForm({
+                                                ...form,
+                                                bulk_min_qty: e.target.value,
+                                            })
+                                        }
+                                        className="p-2.5 border rounded-xl text-sm bg-slate-50"
+                                    />
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        placeholder="Bulk Price"
+                                        value={form.bulk_price}
+                                        onChange={(e) =>
+                                            setForm({
+                                                ...form,
+                                                bulk_price: e.target.value,
+                                            })
+                                        }
+                                        className="p-2.5 border rounded-xl text-sm bg-slate-50"
+                                    />
+                                </div>
                                 <div className="sm:col-span-2">
                                     <input
                                         type="file"
@@ -584,7 +667,7 @@ export default function StockPage({ user }) {
                                     type="button"
                                     onClick={() => {
                                         const csv =
-                                            "sku,name,category,cost_price,sell_price,stock_qty,low_stock_alert\nSKU-1001,Demo Coffee,Beverages,2.50,5.00,50,10\n";
+                                            "sku,name,category,unit,cost_price,sell_price,stock_qty,low_stock_alert\nSKU-1001,Demo Coffee,Beverages,pcs,2.50,5.00,50,10\nSKU-1002,Cooking Oil,Grocery,liter,1.80,3.20,25.5,5\n";
                                         const a = document.createElement("a");
                                         a.href = URL.createObjectURL(
                                             new Blob([csv], {
@@ -601,6 +684,13 @@ export default function StockPage({ user }) {
                                     {t("demo_template")}
                                 </button>
                             </div>
+                            <p className="text-xs text-slate-500">
+                                <code>
+                                    sku, name, category, unit (pcs/kg/liter),
+                                    cost_price, sell_price, stock_qty,
+                                    low_stock_alert
+                                </code>
+                            </p>
                             <input
                                 type="file"
                                 accept=".xlsx,.xls,.csv"
@@ -658,10 +748,14 @@ export default function StockPage({ user }) {
                                             <img
                                                 src={p.image_url || DEFAULT_IMG}
                                                 alt={p.name}
+                                                onError={(e) => {
+                                                    e.currentTarget.src =
+                                                        DEFAULT_IMG;
+                                                }}
                                                 onClick={() =>
                                                     setSelectedProduct(p)
                                                 }
-                                                className="w-10 h-10 rounded-lg object-cover border cursor-pointer"
+                                                className="w-11 h-11 rounded-lg object-contain bg-slate-50 border cursor-pointer"
                                             />
                                         </td>
                                         <td className="p-3 font-mono text-xs">
@@ -673,7 +767,14 @@ export default function StockPage({ user }) {
                                             }
                                             className="p-3 font-medium text-indigo-600 hover:underline cursor-pointer"
                                         >
-                                            {p.name}
+                                            <div>{p.name}</div>
+                                            {p.bulk_min_qty && p.bulk_price && (
+                                                <div className="text-[11px] text-emerald-600">
+                                                    Bulk: {p.bulk_min_qty}+{" "}
+                                                    {p.unit} @ {sym}
+                                                    {p.bulk_price}
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="p-3 text-xs text-slate-500">
                                             <div>{p.category?.name || "-"}</div>
@@ -689,9 +790,9 @@ export default function StockPage({ user }) {
                                         </td>
                                         <td className="p-3">
                                             <span
-                                                className={`px-2 py-0.5 rounded-full text-xs font-semibold ${p.stock_qty <= p.low_stock_alert ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}
+                                                className={`px-2 py-0.5 rounded-full text-xs font-semibold ${Number(p.stock_qty) <= Number(p.low_stock_alert) ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}
                                             >
-                                                {p.stock_qty}
+                                                {p.stock_qty} {p.unit}
                                             </span>
                                         </td>
                                         <td className="p-3 flex items-center gap-1">
@@ -713,6 +814,7 @@ export default function StockPage({ user }) {
                                                             p.vendor_id || "",
                                                         sku: p.sku,
                                                         name: p.name,
+                                                        unit: p.unit || "pcs",
                                                         cost_price:
                                                             p.cost_price,
                                                         sell_price:
@@ -720,6 +822,14 @@ export default function StockPage({ user }) {
                                                         stock_qty: p.stock_qty,
                                                         low_stock_alert:
                                                             p.low_stock_alert,
+                                                        max_purchase_qty:
+                                                            p.max_purchase_qty ||
+                                                            "",
+                                                        bulk_min_qty:
+                                                            p.bulk_min_qty ||
+                                                            "",
+                                                        bulk_price:
+                                                            p.bulk_price || "",
                                                         image: null,
                                                     });
                                                 }}
@@ -759,7 +869,7 @@ export default function StockPage({ user }) {
                             <img
                                 src={selectedProduct.image_url || DEFAULT_IMG}
                                 alt={selectedProduct.name}
-                                className="w-16 h-16 rounded-2xl object-cover border"
+                                className="w-16 h-16 rounded-2xl object-contain bg-slate-50 border"
                             />
                             <div>
                                 <h3 className="font-bold text-lg">
@@ -772,12 +882,12 @@ export default function StockPage({ user }) {
                                 <p className="text-sm font-bold text-indigo-600 mt-1">
                                     {sym}
                                     {selectedProduct.sell_price} | Stock:{" "}
-                                    {selectedProduct.stock_qty}
+                                    {selectedProduct.stock_qty}{" "}
+                                    {selectedProduct.unit}
                                 </p>
                             </div>
                         </div>
 
-                        {/* Price Batches */}
                         <div className="border-t pt-3 space-y-2">
                             <div className="text-xs font-bold text-slate-600">
                                 Price Batches (Same SKU, Different Price)
@@ -844,6 +954,7 @@ export default function StockPage({ user }) {
                                 <input
                                     required
                                     type="number"
+                                    step="0.01"
                                     placeholder="Qty"
                                     value={batchForm.stock_qty}
                                     onChange={(e) =>

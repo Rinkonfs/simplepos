@@ -17,6 +17,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/settings', [SettingController::class, 'index']);
@@ -26,12 +28,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/profile', [AuthController::class, 'updateProfile']);
     Route::put('/profile/address', [AuthController::class, 'saveAddress']);
     Route::post('/discount-codes/validate', [DiscountCodeController::class, 'validateCode']);
-    Route::patch('/orders/{order}/cancel', [OrderController::class, 'cancel']);
-Route::delete('/orders/{order}', [OrderController::class, 'destroy']);
 
     Route::get('/orders', [OrderController::class, 'index']);
     Route::post('/checkout', [OrderController::class, 'checkout']);
     Route::put('/orders/{order}', [OrderController::class, 'updateOrder']);
+    Route::patch('/orders/{order}/cancel', [OrderController::class, 'cancel']);
+    Route::delete('/orders/{order}', [OrderController::class, 'destroy']);
 
     // Seller & Super Admin
     Route::middleware('role:super_admin,seller')->group(function () {

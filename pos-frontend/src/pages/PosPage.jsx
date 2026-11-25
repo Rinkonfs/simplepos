@@ -61,27 +61,40 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
         }
     }, [user?.saved_address]);
 
+    const maxAllowed = (p) =>
+        p.max_purchase_qty
+            ? Math.min(Number(p.stock_qty), Number(p.max_purchase_qty))
+            : Number(p.stock_qty);
+
+    const getUnitPrice = (p, qty) =>
+        p.bulk_min_qty && p.bulk_price && qty >= Number(p.bulk_min_qty)
+            ? Number(p.bulk_price)
+            : Number(p.sell_price);
+
     const startEditingOrder = (order) => {
         setEditingOrder(order);
         setCart(
-            order.items.map((i) => ({
-                product: {
-                    id: i.product_id,
-                    name: i.product?.name || "Product",
-                    sell_price: i.unit_price,
-                    stock_qty:
-                        (products.find((p) => p.id === i.product_id)
-                            ?.stock_qty || 0) + i.quantity,
-                },
-                qty: i.quantity,
-            })),
+            order.items.map((i) => {
+                const live = products.find((p) => p.id === i.product_id);
+                return {
+                    product: {
+                        ...(live || {}),
+                        id: i.product_id,
+                        name: i.product?.name || "Product",
+                        unit: live?.unit || i.product?.unit || "pcs",
+                        sell_price: live?.sell_price || i.unit_price,
+                        stock_qty:
+                            Number(live?.stock_qty || 0) + Number(i.quantity),
+                    },
+                    qty: Number(i.quantity),
+                };
+            }),
         );
         setDeliveryType(order.delivery_type || "pickup");
         setAddress(order.shipping_address || user?.saved_address || "");
         setInvoiceOrder(null);
     };
 
-    // Load order if navigated from My Orders -> Edit
     useEffect(() => {
         if (location.state?.editOrder && products.length > 0) {
             startEditingOrder(location.state.editOrder);
@@ -104,14 +117,17 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
 
     const addToCart = (product) => {
         setCart((prev) => {
+            const limit = maxAllowed(product);
             const existing = prev.find((i) => i.product.id === product.id);
             if (existing) {
-                if (existing.qty >= product.stock_qty) return prev;
+                if (existing.qty >= limit) return prev;
                 return prev.map((i) =>
-                    i.product.id === product.id ? { ...i, qty: i.qty + 1 } : i,
+                    i.product.id === product.id
+                        ? { ...i, qty: Math.min(i.qty + 1, limit) }
+                        : i,
                 );
             }
-            return [...prev, { product, qty: 1 }];
+            return [...prev, { product, qty: Math.min(1, limit) }];
         });
     };
 
@@ -123,7 +139,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
         setCart((prev) =>
             prev.map((i) =>
                 i.product.id === productId
-                    ? { ...i, qty: Math.min(newQty, i.product.stock_qty) }
+                    ? { ...i, qty: Math.min(newQty, maxAllowed(i.product)) }
                     : i,
             ),
         );
@@ -143,7 +159,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
     };
 
     const subtotal = cart.reduce(
-        (sum, i) => sum + i.product.sell_price * i.qty,
+        (sum, i) => sum + getUnitPrice(i.product, i.qty) * i.qty,
         0,
     );
     let discountAmt = appliedDiscount
@@ -259,33 +275,9 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
             )
             .join("");
         const win = window.open("", "_blank", "width=400,height=600");
-        win.document.write(`
-      <html>
-        <head>
-          <title>Invoice ${o.order_number}</title>
-          <style>
-            body { font-family: sans-serif; padding: 20px; font-size: 13px; }
-            h2 { text-align: center; margin-bottom: 4px; }
-            p { text-align: center; color: #555; margin: 2px 0; font-size: 12px; }
-            table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-            td { padding: 6px 0; border-bottom: 1px dashed #ddd; }
-            .total { font-weight: bold; font-size: 16px; border-top: 2px solid #000; padding-top: 8px; display: flex; justify-content: space-between; }
-          </style>
-        </head>
-        <body>
-          <h2>INVOICE</h2>
-          <p>${o.order_number}</p>
-          <p>${new Date(o.created_at).toLocaleString()}</p>
-          <p>Customer: ${o.customer_name || o.user?.name || "Walk-in"}</p>
-          <p>Payment: ${formatPayment(o.payment_method)} (${(o.payment_status || "unpaid").toUpperCase()})</p>
-          <table>${rows}</table>
-          ${Number(o.discount_amount) > 0 ? `<div style="display:flex;justify-content:space-between"><span>Discount (${o.discount_code})</span><span>-${sym}${o.discount_amount}</span></div>` : ""}
-          ${Number(o.adjustment_amount) !== 0 ? `<div style="display:flex;justify-content:space-between"><span>Adjustment</span><span>${sym}${o.adjustment_amount}</span></div>` : ""}
-          <div class="total"><span>Total</span><span>${sym}${o.total_amount}</span></div>
-          <script>window.onload = () => { window.print(); window.close(); }</script>
-        </body>
-      </html>
-    `);
+        win.document.write(
+            `<html><head><title>Invoice ${o.order_number}</title><style>body{font-family:sans-serif;padding:20px;font-size:13px}h2{text-align:center;margin-bottom:4px}p{text-align:center;color:#555;margin:2px 0;font-size:12px}table{width:100%;border-collapse:collapse;margin:16px 0}td{padding:6px 0;border-bottom:1px dashed #ddd}.total{font-weight:bold;font-size:16px;border-top:2px solid #000;padding-top:8px;display:flex;justify-content:space-between}</style></head><body><h2>INVOICE</h2><p>${o.order_number}</p><p>${new Date(o.created_at).toLocaleString()}</p><p>Customer: ${o.customer_name || o.user?.name || "Walk-in"}</p><p>Payment: ${formatPayment(o.payment_method)} (${(o.payment_status || "unpaid").toUpperCase()})</p><table>${rows}</table>${Number(o.discount_amount) > 0 ? `<div style="display:flex;justify-content:space-between"><span>Discount (${o.discount_code})</span><span>-${sym}${o.discount_amount}</span></div>` : ""}${Number(o.adjustment_amount) !== 0 ? `<div style="display:flex;justify-content:space-between"><span>Adjustment</span><span>${sym}${o.adjustment_amount}</span></div>` : ""}<div class="total"><span>Total</span><span>${sym}${o.total_amount}</span></div><script>window.onload=()=>{window.print();window.close()}</script></body></html>`,
+        );
         win.document.close();
     };
 
@@ -323,7 +315,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                         <button
                             key={p.id}
                             onClick={() => addToCart(p)}
-                            disabled={p.stock_qty <= 0}
+                            disabled={Number(p.stock_qty) <= 0}
                             className="p-3 bg-white rounded-2xl border border-slate-200 text-left hover:border-indigo-500 active:scale-95 transition disabled:opacity-50 space-y-2"
                         >
                             <div className="w-full aspect-square bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center p-2 border border-slate-100">
@@ -342,13 +334,24 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                             <div className="text-xs text-slate-500">
                                 {p.sku}
                             </div>
+                            {p.bulk_min_qty && p.bulk_price && (
+                                <div className="text-[10px] text-emerald-600 font-semibold">
+                                    Buy {p.bulk_min_qty}+ {p.unit} @ {sym}
+                                    {p.bulk_price}
+                                </div>
+                            )}
+                            {p.max_purchase_qty && (
+                                <div className="text-[10px] text-amber-600">
+                                    Max {p.max_purchase_qty} {p.unit}/order
+                                </div>
+                            )}
                             <div className="flex justify-between items-center">
                                 <span className="font-bold text-indigo-600">
                                     {sym}
                                     {p.sell_price}
                                 </span>
                                 <span className="text-[11px] bg-slate-100 px-2 py-0.5 rounded-full">
-                                    {t("stock_left")}: {p.stock_qty}
+                                    {p.stock_qty} {p.unit}
                                 </span>
                             </div>
                         </button>
@@ -388,21 +391,41 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                         <input
                             placeholder="Search customer name / phone..."
                             value={customerSearch}
-                            onChange={(e) => setCustomerSearch(e.target.value)}
+                            onChange={(e) => {
+                                setCustomerSearch(e.target.value);
+                                if (customerId) setCustomerId("");
+                            }}
                             className="w-full p-2 border rounded-lg text-xs bg-white"
                         />
-                        <select
-                            value={customerId}
-                            onChange={(e) => setCustomerId(e.target.value)}
-                            className="w-full p-2 border rounded-lg text-xs bg-white"
-                        >
-                            <option value="">{t("walk_in_select")}</option>
-                            {filteredCustomers.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                    {c.name} ({c.phone || c.email})
-                                </option>
-                            ))}
-                        </select>
+                        {customerSearch &&
+                            !customerId &&
+                            filteredCustomers.length > 0 && (
+                                <div className="bg-white border rounded-xl max-h-36 overflow-y-auto divide-y shadow-sm">
+                                    {filteredCustomers.map((c) => (
+                                        <button
+                                            key={c.id}
+                                            type="button"
+                                            onClick={() => {
+                                                setCustomerId(String(c.id));
+                                                setCustomerName(c.name);
+                                                setCustomerSearch(
+                                                    `${c.name} (${c.phone || c.email})`,
+                                                );
+                                                if (c.saved_address)
+                                                    setAddress(c.saved_address);
+                                            }}
+                                            className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50"
+                                        >
+                                            <div className="font-semibold">
+                                                {c.name}
+                                            </div>
+                                            <div className="text-slate-500">
+                                                {c.phone || c.email}
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         {!customerId && (
                             <input
                                 placeholder={t("walk_in_placeholder")}
@@ -422,86 +445,99 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                     </div>
                 ) : (
                     <div className="space-y-3">
-                        {cart.map((item) => (
-                            <div
-                                key={item.product.id}
-                                className="flex items-center justify-between gap-2 text-sm border-b pb-3"
-                            >
-                                <div className="min-w-0 flex-1">
-                                    <div className="font-medium truncate">
-                                        {item.product.name}
-                                    </div>
-                                    <div className="text-xs text-slate-500">
-                                        {sym}
-                                        {item.product.sell_price} × {item.qty} ={" "}
-                                        <span className="font-semibold text-indigo-600">
+                        {cart.map((item) => {
+                            const unitPrice = getUnitPrice(
+                                item.product,
+                                item.qty,
+                            );
+                            const isBulk =
+                                unitPrice < Number(item.product.sell_price);
+                            return (
+                                <div
+                                    key={item.product.id}
+                                    className="flex items-center justify-between gap-2 text-sm border-b pb-3"
+                                >
+                                    <div className="min-w-0 flex-1">
+                                        <div className="font-medium truncate">
+                                            {item.product.name}
+                                            {isBulk && (
+                                                <span className="ml-1 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">
+                                                    Bulk!
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-xs text-slate-500">
                                             {sym}
-                                            {(
-                                                item.product.sell_price *
-                                                item.qty
-                                            ).toFixed(2)}
-                                        </span>
+                                            {unitPrice} × {item.qty}{" "}
+                                            {item.product.unit} ={" "}
+                                            <span className="font-semibold text-indigo-600">
+                                                {sym}
+                                                {(unitPrice * item.qty).toFixed(
+                                                    2,
+                                                )}
+                                            </span>
+                                        </div>
                                     </div>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            updateQty(
-                                                item.product.id,
-                                                item.qty - 1,
-                                            )
-                                        }
-                                        className="p-1 rounded-lg bg-slate-100"
-                                    >
-                                        <Minus className="w-3.5 h-3.5" />
-                                    </button>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        max={item.product.stock_qty}
-                                        value={item.qty}
-                                        onChange={(e) => {
-                                            const val = parseInt(
-                                                e.target.value,
-                                                10,
-                                            );
-                                            if (!isNaN(val)) {
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={() =>
                                                 updateQty(
                                                     item.product.id,
-                                                    Math.max(1, val),
-                                                );
+                                                    item.qty - 1,
+                                                )
                                             }
-                                        }}
-                                        className="w-12 text-center font-semibold text-xs p-1 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            updateQty(
-                                                item.product.id,
-                                                item.qty + 1,
-                                            )
-                                        }
-                                        disabled={
-                                            item.qty >= item.product.stock_qty
-                                        }
-                                        className="p-1 rounded-lg bg-slate-100 disabled:opacity-40"
-                                    >
-                                        <Plus className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            updateQty(item.product.id, 0)
-                                        }
-                                        className="p-1 rounded-lg text-red-500 hover:bg-red-50 ml-1"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
+                                            className="p-1 rounded-lg bg-slate-100"
+                                        >
+                                            <Minus className="w-3.5 h-3.5" />
+                                        </button>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0.01"
+                                            max={maxAllowed(item.product)}
+                                            value={item.qty}
+                                            onChange={(e) => {
+                                                const val = parseFloat(
+                                                    e.target.value,
+                                                );
+                                                if (!isNaN(val))
+                                                    updateQty(
+                                                        item.product.id,
+                                                        Math.max(0.01, val),
+                                                    );
+                                            }}
+                                            className="w-14 text-center font-semibold text-xs p-1 border border-slate-200 rounded-lg"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                updateQty(
+                                                    item.product.id,
+                                                    item.qty + 1,
+                                                )
+                                            }
+                                            disabled={
+                                                item.qty >=
+                                                maxAllowed(item.product)
+                                            }
+                                            className="p-1 rounded-lg bg-slate-100 disabled:opacity-40"
+                                        >
+                                            <Plus className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                updateQty(item.product.id, 0)
+                                            }
+                                            className="p-1 rounded-lg text-red-500 hover:bg-red-50 ml-0.5"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
 
@@ -656,7 +692,6 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                 </button>
             </div>
 
-            {/* Online Payment Gateway Modal */}
             {gatewayOpen && (
                 <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
                     <form
@@ -705,7 +740,6 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                 </div>
             )}
 
-            {/* Post-Checkout Invoice Modal */}
             {invoiceOrder && (
                 <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4">

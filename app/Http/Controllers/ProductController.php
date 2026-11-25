@@ -36,10 +36,14 @@ class ProductController extends Controller
             'vendor_id' => 'nullable|exists:vendors,id',
             'sku' => 'required|string',
             'name' => 'required|string',
+            'unit' => 'nullable|in:pcs,kg,liter',
             'cost_price' => 'required|numeric|min:0',
             'sell_price' => 'required|numeric|min:0',
-            'stock_qty' => 'required|integer|min:0',
-            'low_stock_alert' => 'nullable|integer|min:0',
+            'stock_qty' => 'required|numeric|min:0',
+            'low_stock_alert' => 'nullable|numeric|min:0',
+            'max_purchase_qty' => 'nullable|numeric|min:0.01',
+            'bulk_min_qty' => 'nullable|numeric|min:0.01',
+            'bulk_price' => 'nullable|numeric|min:0',
             'image' => 'nullable|image|max:2048',
         ]);
 
@@ -49,11 +53,15 @@ class ProductController extends Controller
             $imageUrl = asset('storage/' . $path);
         }
 
-        // If SKU already exists, update product & add stock
+        $fields = [
+            'category_id', 'vendor_id', 'name', 'unit', 'cost_price', 'sell_price',
+            'low_stock_alert', 'max_purchase_qty', 'bulk_min_qty', 'bulk_price',
+        ];
+
         $existing = Product::where('sku', trim($request->sku))->first();
         if ($existing) {
-            $qtyToAdd = (int) $request->stock_qty;
-            $updateData = $request->only(['category_id', 'vendor_id', 'name', 'cost_price', 'sell_price', 'low_stock_alert']);
+            $qtyToAdd = (float) $request->stock_qty;
+            $updateData = $request->only($fields);
             if ($imageUrl) {
                 $updateData['image_url'] = $imageUrl;
             }
@@ -73,8 +81,9 @@ class ProductController extends Controller
             return response()->json($existing->load(['category:id,name', 'vendor:id,name', 'batches']), 200);
         }
 
-        $data = $request->only(['category_id', 'vendor_id', 'sku', 'name', 'cost_price', 'sell_price', 'stock_qty', 'low_stock_alert']);
+        $data = $request->only(array_merge($fields, ['sku', 'stock_qty']));
         $data['sku'] = trim($data['sku']);
+        $data['unit'] = $data['unit'] ?? 'pcs';
         if ($imageUrl) {
             $data['image_url'] = $imageUrl;
         }
@@ -101,10 +110,14 @@ class ProductController extends Controller
             'vendor_id' => 'nullable|exists:vendors,id',
             'sku' => 'required|unique:products,sku,' . $product->id,
             'name' => 'required|string',
+            'unit' => 'nullable|in:pcs,kg,liter',
             'cost_price' => 'required|numeric|min:0',
             'sell_price' => 'required|numeric|min:0',
-            'stock_qty' => 'required|integer|min:0',
-            'low_stock_alert' => 'nullable|integer|min:0',
+            'stock_qty' => 'required|numeric|min:0',
+            'low_stock_alert' => 'nullable|numeric|min:0',
+            'max_purchase_qty' => 'nullable|numeric|min:0.01',
+            'bulk_min_qty' => 'nullable|numeric|min:0.01',
+            'bulk_price' => 'nullable|numeric|min:0',
             'image' => 'nullable|image|max:2048',
         ]);
 
@@ -113,10 +126,10 @@ class ProductController extends Controller
             $data['image_url'] = asset('storage/' . $path);
         }
 
-        $diff = $data['stock_qty'] - $product->stock_qty;
+        $diff = (float) $data['stock_qty'] - (float) $product->stock_qty;
         $product->update($data);
 
-        if ($diff !== 0) {
+        if ($diff != 0) {
             StockMovement::create([
                 'product_id' => $product->id,
                 'user_id' => $request->user()->id,
@@ -135,7 +148,7 @@ class ProductController extends Controller
             'label' => 'required|string|max:100',
             'cost_price' => 'required|numeric|min:0',
             'sell_price' => 'required|numeric|min:0',
-            'stock_qty' => 'required|integer|min:1',
+            'stock_qty' => 'required|numeric|min:0.01',
         ]);
 
         $product->batches()->create($data);
@@ -184,13 +197,14 @@ class ProductController extends Controller
                     [
                         'category_id' => $categoryId,
                         'name' => trim($data['name'] ?? ''),
+                        'unit' => in_array($data['unit'] ?? '', ['pcs', 'kg', 'liter']) ? $data['unit'] : 'pcs',
                         'cost_price' => (float) ($data['cost_price'] ?? 0),
                         'sell_price' => (float) ($data['sell_price'] ?? 0),
-                        'low_stock_alert' => (int) ($data['low_stock_alert'] ?? 5),
+                        'low_stock_alert' => (float) ($data['low_stock_alert'] ?? 5),
                     ]
                 );
 
-                $qty = (int) ($data['stock_qty'] ?? 0);
+                $qty = (float) ($data['stock_qty'] ?? 0);
                 if ($qty > 0) {
                     $product->increment('stock_qty', $qty);
                     StockMovement::create([

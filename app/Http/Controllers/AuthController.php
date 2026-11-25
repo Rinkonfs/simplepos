@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\{DB, Hash, Mail};
 
 class AuthController extends Controller
 {
@@ -48,10 +48,72 @@ class AuthController extends Controller
         ], 201);
     }
 
+    public function forgotPassword(Request $request)
+    {
+        $request->validate(['email' => 'required|email|exists:users,email']);
+        $code = (string) rand(100000, 999999);
+
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $request->email],
+            ['token' => Hash::make($code), 'created_at' => now()]
+        );
+
+        Mail::raw("Your StockPro POS password reset code is: {$code}", function ($m) use ($request) {
+            $m->to($request->email)->subject('Password Reset Code');
+        });
+
+        return response()->json(['message' => 'Reset code sent to your email!']);
+    }
+
+    public function resetPassword(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email|exists:users,email',
+            'code' => 'required|string',
+            'password' => 'required|min:6|confirmed',
+        ]);
+
+        $record = DB::table('password_reset_tokens')->where('email', $request->email)->first();
+        if (!$record || !Hash::check($request->code, $record->token)) {
+            return response()->json(['message' => 'Invalid or expired reset code'], 422);
+        }
+
+        User::where('email', $request->email)->update(['password' => Hash::make($request->password)]);
+        DB::table('password_reset_tokens')->where('email', $request->email)->delete();
+
+        return response()->json(['message' => 'Password reset successfully! You can now sign in.']);
+    }
+
     public function logout(Request $request)
     {
         $request->user()->currentAccessToken()->delete();
         return response()->json(['message' => 'Logged out']);
+    }
+
+    public function updateProfile(Request $request)
+    {
+        $user = $request->user();
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'phone' => 'nullable|string|max:30',
+            'saved_address' => 'nullable|string|max:500',
+            'password' => 'nullable|min:6|confirmed',
+            'photo' => 'nullable|image|max:2048',
+        ]);
+
+        if ($request->hasFile('photo')) {
+            $path = $request->file('photo')->store('users', 'public');
+            $data['photo_url'] = asset('storage/' . $path);
+        }
+
+        if (!empty($data['password'])) {
+            $data['password'] = Hash::make($data['password']);
+        } else {
+            unset($data['password']);
+        }
+
+        $user->update($data);
+        return response()->json($user->fresh());
     }
 
     public function saveAddress(Request $request)
@@ -127,31 +189,6 @@ class AuthController extends Controller
         $user->update($data);
         return response()->json($user);
     }
-    public function updateProfile(Request $request)
-{
-    $user = $request->user();
-    $data = $request->validate([
-        'name' => 'required|string|max:255',
-        'phone' => 'nullable|string|max:30',
-        'saved_address' => 'nullable|string|max:500',
-        'password' => 'nullable|min:6|confirmed',
-        'photo' => 'nullable|image|max:2048',
-    ]);
-
-    if ($request->hasFile('photo')) {
-        $path = $request->file('photo')->store('users', 'public');
-        $data['photo_url'] = asset('storage/' . $path);
-    }
-
-    if (!empty($data['password'])) {
-        $data['password'] = Hash::make($data['password']);
-    } else {
-        unset($data['password']);
-    }
-
-    $user->update($data);
-    return response()->json($user->fresh());
-}
 
     public function destroyUser(User $user)
     {
@@ -161,5 +198,4 @@ class AuthController extends Controller
         $user->delete();
         return response()->json(['message' => 'User deleted']);
     }
-
 }
