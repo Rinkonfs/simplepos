@@ -69,6 +69,70 @@ export default function StockPage({ user }) {
         }
     }, [fetchProducts, fetchCategories, user?.role]);
 
+    const downloadCsv = (filename, headers, rows) => {
+        const escape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+        const csv = [
+            headers.join(","),
+            ...rows.map((r) => r.map(escape).join(",")),
+        ].join("\n");
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(
+            new Blob([csv], { type: "text/csv;charset=utf-8;" }),
+        );
+        a.download = filename;
+        a.click();
+    };
+
+    const exportAllProducts = () => {
+        downloadCsv(
+            `all-stock-products-${new Date().toISOString().slice(0, 10)}.csv`,
+            [
+                "SKU",
+                "Name",
+                "Category",
+                "Vendor",
+                "Unit",
+                "Cost Price",
+                "Sell Price",
+                "Stock Qty",
+                "Low Stock Alert",
+                "Max Purchase Qty",
+                "Bulk Min Qty",
+                "Bulk Price",
+            ],
+            products.map((p) => [
+                p.sku,
+                p.name,
+                p.category?.name || "",
+                p.vendor?.name || "",
+                p.unit,
+                p.cost_price,
+                p.sell_price,
+                p.stock_qty,
+                p.low_stock_alert,
+                p.max_purchase_qty || "",
+                p.bulk_min_qty || "",
+                p.bulk_price || "",
+            ]),
+        );
+    };
+
+    const exportStockLogs = () => {
+        downloadCsv(
+            `stock-change-logs-${new Date().toISOString().slice(0, 10)}.csv`,
+            ["Date", "SKU", "Product", "User", "Type", "Quantity", "Reference"],
+            logs.map((l) => [
+                new Date(l.created_at).toLocaleString(),
+                l.product?.sku || "",
+                l.product?.name || "",
+                l.user?.name || "",
+                l.type.toUpperCase(),
+                l.quantity,
+                l.reference || "",
+            ]),
+        );
+    };
+
     const skuMatches =
         form.sku && !editingId
             ? products.filter(
@@ -230,19 +294,37 @@ export default function StockPage({ user }) {
     return (
         <div className="space-y-6">
             {user?.role === "super_admin" && (
-                <div className="flex gap-2">
-                    <button
-                        onClick={() => setTab("stock")}
-                        className={`px-4 py-2 rounded-xl text-sm font-semibold ${tab === "stock" ? "bg-indigo-600 text-white" : "bg-white border"}`}
-                    >
-                        Stock Inventory
-                    </button>
-                    <button
-                        onClick={() => setTab("logs")}
-                        className={`px-4 py-2 rounded-xl text-sm font-semibold ${tab === "logs" ? "bg-indigo-600 text-white" : "bg-white border"}`}
-                    >
-                        Stock Change Logs
-                    </button>
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setTab("stock")}
+                            className={`px-4 py-2 rounded-xl text-sm font-semibold ${tab === "stock" ? "bg-indigo-600 text-white" : "bg-white border"}`}
+                        >
+                            Stock Inventory
+                        </button>
+                        <button
+                            onClick={() => setTab("logs")}
+                            className={`px-4 py-2 rounded-xl text-sm font-semibold ${tab === "logs" ? "bg-indigo-600 text-white" : "bg-white border"}`}
+                        >
+                            Stock Change Logs
+                        </button>
+                    </div>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={exportAllProducts}
+                            className="px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5"
+                        >
+                            <Download className="w-3.5 h-3.5" /> Download All
+                            Stock
+                        </button>
+                        <button
+                            onClick={exportStockLogs}
+                            className="px-3 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5"
+                        >
+                            <Download className="w-3.5 h-3.5" /> Download Stock
+                            Logs
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -667,7 +749,9 @@ export default function StockPage({ user }) {
                                     type="button"
                                     onClick={() => {
                                         const csv =
-                                            "sku,name,category,unit,cost_price,sell_price,stock_qty,low_stock_alert\nSKU-1001,Demo Coffee,Beverages,pcs,2.50,5.00,50,10\nSKU-1002,Cooking Oil,Grocery,liter,1.80,3.20,25.5,5\n";
+                                            "sku,name,category,vendor,unit,cost_price,sell_price,stock_qty,low_stock_alert,max_purchase_qty,bulk_min_qty,bulk_price\n" +
+                                            "SKU-1001,Demo Coffee,Beverages,Fresh Beans Co,pcs,2.50,5.00,50,10,5,10,4.20\n" +
+                                            "SKU-1002,Cooking Oil,Grocery,Pure Oils Ltd,liter,1.80,3.20,25.5,5,,10,2.90\n";
                                         const a = document.createElement("a");
                                         a.href = URL.createObjectURL(
                                             new Blob([csv], {
@@ -686,9 +770,10 @@ export default function StockPage({ user }) {
                             </div>
                             <p className="text-xs text-slate-500">
                                 <code>
-                                    sku, name, category, unit (pcs/kg/liter),
+                                    sku, name, category, vendor, unit,
                                     cost_price, sell_price, stock_qty,
-                                    low_stock_alert
+                                    low_stock_alert, max_purchase_qty,
+                                    bulk_min_qty, bulk_price
                                 </code>
                             </p>
                             <input

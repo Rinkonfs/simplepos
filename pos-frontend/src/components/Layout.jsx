@@ -13,13 +13,15 @@ import {
     Users,
     ClipboardList,
     ChevronDown,
+    Truck,
+    Wallet,
 } from "lucide-react";
 import { useStore } from "../context/StoreContext";
 
 export default function Layout({ user, onLogout, children }) {
     const { t, i18n } = useTranslation();
     const location = useLocation();
-    const { fetchSettings } = useStore();
+    const { fetchSettings, modalMsg, closeNotify } = useStore();
     const [menuOpen, setMenuOpen] = useState(false);
 
     useEffect(() => {
@@ -31,28 +33,41 @@ export default function Layout({ user, onLogout, children }) {
         localStorage.setItem("lang", lang);
     };
 
-    const navItems = [
-        ...(user?.role !== "customer"
-            ? [
-                  { to: "/pos", label: t("pos"), icon: ShoppingCart },
-                  { to: "/stock", label: t("stock"), icon: Package },
-              ]
-            : []),
-        {
-            to: "/orders",
-            label: user?.role === "customer" ? t("my_orders") : t("orders"),
-            icon: ClipboardList,
-        },
-        ...(user?.role === "super_admin"
-            ? [{ to: "/reports", label: t("reports"), icon: BarChart3 }]
-            : []),
-        { to: "/shop", label: t("shop"), icon: Store },
-    ];
+    const navItems =
+        user?.role === "shop"
+            ? [{ to: "/shop", label: t("shop"), icon: Store }]
+            : [
+                  ...(user?.role !== "customer"
+                      ? [
+                            { to: "/pos", label: t("pos"), icon: ShoppingCart },
+                            { to: "/stock", label: t("stock"), icon: Package },
+                        ]
+                      : []),
+                  {
+                      to: "/orders",
+                      label:
+                          user?.role === "customer"
+                              ? t("my_orders")
+                              : t("orders"),
+                      icon: ClipboardList,
+                  },
+                  ...(user?.role === "super_admin"
+                      ? [
+                            {
+                                to: "/reports",
+                                label: t("reports"),
+                                icon: BarChart3,
+                            },
+                        ]
+                      : []),
+                  { to: "/shop", label: t("shop"), icon: Store },
+              ];
 
     const roleColors = {
         super_admin: "bg-purple-100 text-purple-700",
         seller: "bg-blue-100 text-blue-700",
         customer: "bg-emerald-100 text-emerald-700",
+        shop: "bg-amber-100 text-amber-700",
     };
 
     return (
@@ -144,14 +159,16 @@ export default function Layout({ user, onLogout, children }) {
                                             {user.role.replace("_", " ")}
                                         </div>
                                     </div>
-                                    <Link
-                                        to="/profile"
-                                        onClick={() => setMenuOpen(false)}
-                                        className="flex items-center gap-2.5 px-3 py-2 text-sm rounded-xl hover:bg-slate-50 text-slate-700"
-                                    >
-                                        <User className="w-4 h-4 text-indigo-600" />{" "}
-                                        My Profile
-                                    </Link>
+                                    {user.role !== "shop" && (
+                                        <Link
+                                            to="/profile"
+                                            onClick={() => setMenuOpen(false)}
+                                            className="flex items-center gap-2.5 px-3 py-2 text-sm rounded-xl hover:bg-slate-50 text-slate-700"
+                                        >
+                                            <User className="w-4 h-4 text-indigo-600" />{" "}
+                                            My Profile
+                                        </Link>
+                                    )}
                                     {user.role === "super_admin" && (
                                         <>
                                             <Link
@@ -161,7 +178,7 @@ export default function Layout({ user, onLogout, children }) {
                                                 }
                                                 className="flex items-center gap-2.5 px-3 py-2 text-sm rounded-xl hover:bg-slate-50 text-slate-700"
                                             >
-                                                <Store className="w-4 h-4 text-indigo-600" />{" "}
+                                                <Truck className="w-4 h-4 text-indigo-600" />{" "}
                                                 Vendors & PO
                                             </Link>
                                             <Link
@@ -171,7 +188,7 @@ export default function Layout({ user, onLogout, children }) {
                                                 }
                                                 className="flex items-center gap-2.5 px-3 py-2 text-sm rounded-xl hover:bg-slate-50 text-slate-700"
                                             >
-                                                <BarChart3 className="w-4 h-4 text-indigo-600" />{" "}
+                                                <Wallet className="w-4 h-4 text-indigo-600" />{" "}
                                                 Accounting
                                             </Link>
                                             <Link
@@ -214,6 +231,32 @@ export default function Layout({ user, onLogout, children }) {
             </header>
 
             <main className="max-w-7xl mx-auto p-3 sm:p-6">{children}</main>
+
+            {/* Global Notification Modal */}
+            {modalMsg && (
+                <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl">
+                        <div
+                            className={`w-12 h-12 mx-auto rounded-full flex items-center justify-center font-bold text-xl ${
+                                modalMsg.type === "error"
+                                    ? "bg-red-100 text-red-600"
+                                    : "bg-emerald-100 text-emerald-600"
+                            }`}
+                        >
+                            {modalMsg.type === "error" ? "!" : "✓"}
+                        </div>
+                        <p className="text-sm font-medium text-slate-800">
+                            {modalMsg.text}
+                        </p>
+                        <button
+                            onClick={closeNotify}
+                            className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold"
+                        >
+                            OK
+                        </button>
+                    </div>
+                </div>
+            )}
 
             <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex justify-around py-2 px-1 z-30 shadow-lg">
                 {navItems.map(({ to, label, icon: Icon }) => {

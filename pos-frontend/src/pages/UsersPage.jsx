@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Trash2, Edit2 } from "lucide-react";
 import api from "../api/axios";
+import { useStore } from "../context/StoreContext";
 
 const DEFAULT_AVATAR = "https://placehold.co/80x80/e2e8f0/64748b?text=User";
 
 export default function UsersPage() {
+    const { currency, fetchSettings, notify } = useStore();
     const [users, setUsers] = useState([]);
     const [search, setSearch] = useState("");
     const [editingId, setEditingId] = useState(null);
@@ -13,51 +15,73 @@ export default function UsersPage() {
         email: "",
         phone: "",
         saved_address: "",
+        grade_class: "",
+        student_id: "",
+        card_number: "",
         password: "",
         role: "seller",
         photo: null,
     });
 
     const load = () => api.get("/users").then((r) => setUsers(r.data));
+
     useEffect(() => {
         load();
-    }, []);
+        fetchSettings();
+    }, [fetchSettings]);
 
     const save = async (e) => {
         e.preventDefault();
-        const fd = new FormData();
-        Object.entries(form).forEach(([k, v]) => {
-            if (v !== null && v !== "") fd.append(k, v);
-        });
+        try {
+            const fd = new FormData();
+            Object.entries(form).forEach(([k, v]) => {
+                if (v !== null && v !== "") fd.append(k, v);
+            });
 
-        if (editingId) {
-            await api.post(`/users/${editingId}`, fd, {
-                headers: { "Content-Type": "multipart/form-data" },
+            if (editingId) {
+                await api.post(`/users/${editingId}`, fd, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                });
+                notify("User updated!", "success");
+            } else {
+                await api.post("/users", fd, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                });
+                notify("User created!", "success");
+            }
+            setEditingId(null);
+            setForm({
+                name: "",
+                email: "",
+                phone: "",
+                saved_address: "",
+                grade_class: "",
+                student_id: "",
+                card_number: "",
+                password: "",
+                role: "seller",
+                photo: null,
             });
-        } else {
-            await api.post("/users", fd, {
-                headers: { "Content-Type": "multipart/form-data" },
-            });
+            load();
+        } catch (err) {
+            notify(
+                err.response?.data?.message || "Failed to save user",
+                "error",
+            );
         }
-        setEditingId(null);
-        setForm({
-            name: "",
-            email: "",
-            phone: "",
-            saved_address: "",
-            password: "",
-            role: "seller",
-            photo: null,
-        });
-        load();
     };
 
-    const filtered = users.filter(
-        (u) =>
-            u.name.toLowerCase().includes(search.toLowerCase()) ||
-            u.email.toLowerCase().includes(search.toLowerCase()) ||
-            (u.phone || "").includes(search),
-    );
+    const filtered = users.filter((u) => {
+        const q = search.toLowerCase();
+        return (
+            u.name.toLowerCase().includes(q) ||
+            u.email.toLowerCase().includes(q) ||
+            (u.phone || "").toLowerCase().includes(q) ||
+            (u.student_id || "").toLowerCase().includes(q) ||
+            (u.card_number || "").toLowerCase().includes(q) ||
+            (u.grade_class || "").toLowerCase().includes(q)
+        );
+    });
 
     return (
         <div className="space-y-6">
@@ -97,8 +121,10 @@ export default function UsersPage() {
                 >
                     <option value="seller">Seller</option>
                     <option value="customer">Customer</option>
+                    <option value="shop">Shop Only</option>
                     <option value="super_admin">Super Admin</option>
                 </select>
+
                 <input
                     placeholder="Address"
                     value={form.saved_address}
@@ -127,6 +153,39 @@ export default function UsersPage() {
                     }
                     className="p-2 border rounded-xl text-xs"
                 />
+
+                {/* Optional Fields (unlocked in Settings) */}
+                {currency.enable_grade_class && (
+                    <input
+                        placeholder="Grade / Class"
+                        value={form.grade_class}
+                        onChange={(e) =>
+                            setForm({ ...form, grade_class: e.target.value })
+                        }
+                        className="p-2.5 border rounded-xl text-sm bg-indigo-50/40"
+                    />
+                )}
+                {currency.enable_student_id && (
+                    <input
+                        placeholder="Student ID Number"
+                        value={form.student_id}
+                        onChange={(e) =>
+                            setForm({ ...form, student_id: e.target.value })
+                        }
+                        className="p-2.5 border rounded-xl text-sm bg-indigo-50/40"
+                    />
+                )}
+                {currency.enable_card_number && (
+                    <input
+                        placeholder="Card Number"
+                        value={form.card_number}
+                        onChange={(e) =>
+                            setForm({ ...form, card_number: e.target.value })
+                        }
+                        className="p-2.5 border rounded-xl text-sm bg-indigo-50/40"
+                    />
+                )}
+
                 <button
                     type="submit"
                     className="bg-indigo-600 text-white rounded-xl text-sm font-semibold py-2.5 sm:col-span-4"
@@ -136,7 +195,7 @@ export default function UsersPage() {
             </form>
 
             <input
-                placeholder="Search users by name, email, or phone..."
+                placeholder="Search users by name, email, phone, student ID, class, or card number..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full p-3 bg-white border rounded-xl text-sm"
@@ -149,6 +208,11 @@ export default function UsersPage() {
                             <th className="p-3">Photo</th>
                             <th className="p-3">Name</th>
                             <th className="p-3">Email / Phone</th>
+                            {(currency.enable_grade_class ||
+                                currency.enable_student_id ||
+                                currency.enable_card_number) && (
+                                <th className="p-3">Extra Details</th>
+                            )}
                             <th className="p-3">Address</th>
                             <th className="p-3">Role</th>
                             <th className="p-3">Actions</th>
@@ -169,6 +233,26 @@ export default function UsersPage() {
                                     <div>{u.email}</div>
                                     <div>{u.phone || "-"}</div>
                                 </td>
+                                {(currency.enable_grade_class ||
+                                    currency.enable_student_id ||
+                                    currency.enable_card_number) && (
+                                    <td className="p-3 text-xs text-slate-600">
+                                        {currency.enable_grade_class &&
+                                            u.grade_class && (
+                                                <div>
+                                                    Class: {u.grade_class}
+                                                </div>
+                                            )}
+                                        {currency.enable_student_id &&
+                                            u.student_id && (
+                                                <div>ID: {u.student_id}</div>
+                                            )}
+                                        {currency.enable_card_number &&
+                                            u.card_number && (
+                                                <div>Card: {u.card_number}</div>
+                                            )}
+                                    </td>
+                                )}
                                 <td className="p-3 text-xs text-slate-500">
                                     {u.saved_address || "-"}
                                 </td>
@@ -185,6 +269,11 @@ export default function UsersPage() {
                                                 phone: u.phone || "",
                                                 saved_address:
                                                     u.saved_address || "",
+                                                grade_class:
+                                                    u.grade_class || "",
+                                                student_id: u.student_id || "",
+                                                card_number:
+                                                    u.card_number || "",
                                                 password: "",
                                                 role: u.role,
                                                 photo: null,

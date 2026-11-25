@@ -43,7 +43,7 @@ class OrderController extends Controller
             'items.*.unit_price' => 'nullable|numeric|min:0',
         ]);
 
-        $isStaff = in_array($request->user()->role, ['super_admin', 'seller']);
+        $isStaff = in_array($request->user()->role, ['super_admin', 'seller', 'shop']);
         $adjustment = $isStaff ? (float) ($request->adjustment_amount ?? 0) : 0;
         $orderUserId = ($isStaff && $request->customer_id) ? $request->customer_id : $request->user()->id;
 

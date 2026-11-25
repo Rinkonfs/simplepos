@@ -97,6 +97,9 @@ class AuthController extends Controller
             'name' => 'required|string|max:255',
             'phone' => 'nullable|string|max:30',
             'saved_address' => 'nullable|string|max:500',
+            'grade_class' => 'nullable|string|max:50',
+            'student_id' => 'nullable|string|max:50',
+            'card_number' => 'nullable|string|max:50',
             'password' => 'nullable|min:6|confirmed',
             'photo' => 'nullable|image|max:2048',
         ]);
@@ -127,7 +130,7 @@ class AuthController extends Controller
     {
         return response()->json(
             User::where('role', 'customer')
-                ->select('id', 'name', 'email', 'phone', 'saved_address')
+                ->select('id', 'name', 'email', 'phone', 'saved_address', 'grade_class', 'student_id', 'card_number')
                 ->orderBy('name')
                 ->get()
         );
@@ -136,7 +139,7 @@ class AuthController extends Controller
     public function users()
     {
         return response()->json(
-            User::select('id', 'name', 'email', 'phone', 'role', 'saved_address', 'photo_url', 'locale')
+            User::select('id', 'name', 'email', 'phone', 'role', 'saved_address', 'grade_class', 'student_id', 'card_number', 'photo_url', 'locale')
                 ->orderBy('name')
                 ->get()
         );
@@ -149,8 +152,11 @@ class AuthController extends Controller
             'email' => 'required|email|unique:users,email',
             'phone' => 'nullable|string|max:30',
             'saved_address' => 'nullable|string|max:500',
+            'grade_class' => 'nullable|string|max:50',
+            'student_id' => 'nullable|string|max:50',
+            'card_number' => 'nullable|string|max:50',
             'password' => 'required|min:6',
-            'role' => 'required|in:super_admin,seller,customer',
+            'role' => 'required|in:super_admin,seller,customer,shop',
             'photo' => 'nullable|image|max:2048',
         ]);
 
@@ -170,7 +176,10 @@ class AuthController extends Controller
             'email' => 'required|email|unique:users,email,' . $user->id,
             'phone' => 'nullable|string|max:30',
             'saved_address' => 'nullable|string|max:500',
-            'role' => 'required|in:super_admin,seller,customer',
+            'grade_class' => 'nullable|string|max:50',
+            'student_id' => 'nullable|string|max:50',
+            'card_number' => 'nullable|string|max:50',
+            'role' => 'required|in:super_admin,seller,customer,shop',
             'password' => 'nullable|min:6',
             'photo' => 'nullable|image|max:2048',
         ]);

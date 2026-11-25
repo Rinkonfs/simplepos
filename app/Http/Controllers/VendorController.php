@@ -17,8 +17,10 @@ class VendorController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'phone' => 'nullable|string|max:30',
+            'whatsapp_number' => 'nullable|string|max:30',
             'email' => 'nullable|email',
             'address' => 'nullable|string|max:500',
+            'bank_details' => 'nullable|string|max:1000',
         ]);
         return response()->json(Vendor::create($data), 201);
     }
@@ -28,8 +30,10 @@ class VendorController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'phone' => 'nullable|string|max:30',
+            'whatsapp_number' => 'nullable|string|max:30',
             'email' => 'nullable|email',
             'address' => 'nullable|string|max:500',
+            'bank_details' => 'nullable|string|max:1000',
         ]);
         $vendor->update($data);
         return response()->json($vendor);

@@ -6,6 +6,7 @@ use App\Imports\ProductsImport;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\StockMovement;
+use App\Models\Vendor;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -192,15 +193,25 @@ class ProductController extends Controller
                     $categoryId = $category->id;
                 }
 
+                $vendorId = null;
+                if (!empty($data['vendor'])) {
+                    $vendor = Vendor::firstOrCreate(['name' => trim($data['vendor'])]);
+                    $vendorId = $vendor->id;
+                }
+
                 $product = Product::updateOrCreate(
                     ['sku' => trim($data['sku'])],
                     [
                         'category_id' => $categoryId,
+                        'vendor_id' => $vendorId,
                         'name' => trim($data['name'] ?? ''),
-                        'unit' => in_array($data['unit'] ?? '', ['pcs', 'kg', 'liter']) ? $data['unit'] : 'pcs',
+                        'unit' => in_array(strtolower(trim($data['unit'] ?? '')), ['pcs', 'kg', 'liter']) ? strtolower(trim($data['unit'])) : 'pcs',
                         'cost_price' => (float) ($data['cost_price'] ?? 0),
                         'sell_price' => (float) ($data['sell_price'] ?? 0),
                         'low_stock_alert' => (float) ($data['low_stock_alert'] ?? 5),
+                        'max_purchase_qty' => !empty($data['max_purchase_qty']) ? (float) $data['max_purchase_qty'] : null,
+                        'bulk_min_qty' => !empty($data['bulk_min_qty']) ? (float) $data['bulk_min_qty'] : null,
+                        'bulk_price' => !empty($data['bulk_price']) ? (float) $data['bulk_price'] : null,
                     ]
                 );
 

@@ -22,22 +22,30 @@ Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/settings', [SettingController::class, 'index']);
+Route::get('/public/po/{token}', [PurchaseOrderController::class, 'publicShow']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
-    Route::post('/profile', [AuthController::class, 'updateProfile']);
-    Route::put('/profile/address', [AuthController::class, 'saveAddress']);
     Route::post('/discount-codes/validate', [DiscountCodeController::class, 'validateCode']);
-
-    Route::get('/orders', [OrderController::class, 'index']);
     Route::post('/checkout', [OrderController::class, 'checkout']);
-    Route::put('/orders/{order}', [OrderController::class, 'updateOrder']);
-    Route::patch('/orders/{order}/cancel', [OrderController::class, 'cancel']);
-    Route::delete('/orders/{order}', [OrderController::class, 'destroy']);
+
+    // Profile & Orders (blocked for 'shop' role)
+    Route::middleware('role:super_admin,seller,customer')->group(function () {
+        Route::post('/profile', [AuthController::class, 'updateProfile']);
+        Route::put('/profile/address', [AuthController::class, 'saveAddress']);
+        Route::get('/orders', [OrderController::class, 'index']);
+        Route::put('/orders/{order}', [OrderController::class, 'updateOrder']);
+        Route::patch('/orders/{order}/cancel', [OrderController::class, 'cancel']);
+        Route::delete('/orders/{order}', [OrderController::class, 'destroy']);
+    });
+
+    // Customer Search (available to Staff + Shop Kiosk)
+    Route::middleware('role:super_admin,seller,shop')->group(function () {
+        Route::get('/customers', [AuthController::class, 'customers']);
+    });
 
     // Seller & Super Admin
     Route::middleware('role:super_admin,seller')->group(function () {
-        Route::get('/customers', [AuthController::class, 'customers']);
         Route::get('/vendors', [VendorController::class, 'index']);
         Route::post('/products', [ProductController::class, 'store']);
         Route::post('/products/bulk-upload', [ProductController::class, 'bulkUpload']);
@@ -60,6 +68,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/purchase-orders', [PurchaseOrderController::class, 'index']);
         Route::post('/purchase-orders', [PurchaseOrderController::class, 'store']);
+        Route::put('/purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'update']);
         Route::patch('/purchase-orders/{purchaseOrder}/status', [PurchaseOrderController::class, 'updateStatus']);
         Route::post('/purchase-orders/{purchaseOrder}/pay', [PurchaseOrderController::class, 'recordPayment']);
 

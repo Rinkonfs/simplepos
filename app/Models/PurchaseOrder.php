@@ -6,7 +6,15 @@ use Illuminate\Database\Eloquent\Model;
 
 class PurchaseOrder extends Model
 {
-    protected $fillable = ['po_number', 'vendor_id', 'user_id', 'total_amount', 'paid_amount', 'status'];
+    protected $fillable = [
+        'po_number',
+        'public_token',
+        'vendor_id',
+        'user_id',
+        'total_amount',
+        'paid_amount',
+        'status',
+    ];
 
     public function vendor()
     {
@@ -16,5 +24,10 @@ class PurchaseOrder extends Model
     public function items()
     {
         return $this->hasMany(PurchaseOrderItem::class);
+    }
+
+    public function payments()
+    {
+        return $this->hasMany(VendorPayment::class)->latest();
     }
 }

@@ -24,9 +24,16 @@ const DEFAULT_IMG = "https://placehold.co/120x120/e2e8f0/64748b?text=No+Photo";
 export default function PosPage({ channel = "pos", user, onUserUpdate }) {
     const { t } = useTranslation();
     const location = useLocation();
-    const isStaff = user?.role === "super_admin" || user?.role === "seller";
-    const { products, customers, currency, fetchProducts, fetchCustomers } =
-        useStore();
+    const isStaff = ["super_admin", "seller", "shop"].includes(user?.role);
+    const {
+        products,
+        customers,
+        currency,
+        fetchProducts,
+        fetchCustomers,
+        fetchSettings,
+        notify,
+    } = useStore();
     const sym = currency.currency_symbol;
 
     const [search, setSearch] = useState("");
@@ -52,8 +59,9 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
 
     useEffect(() => {
         fetchProducts();
+        fetchSettings();
         if (isStaff) fetchCustomers();
-    }, [fetchProducts, fetchCustomers, isStaff]);
+    }, [fetchProducts, fetchSettings, fetchCustomers, isStaff]);
 
     useEffect(() => {
         if (user?.saved_address && !address) {
@@ -108,12 +116,35 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
             p.sku.toLowerCase().includes(search.toLowerCase()),
     );
 
-    const filteredCustomers = customers.filter(
-        (c) =>
-            c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-            c.email.toLowerCase().includes(customerSearch.toLowerCase()) ||
-            (c.phone || "").includes(customerSearch),
+    const filteredCustomers = customers.filter((c) => {
+        const q = customerSearch.toLowerCase();
+        return (
+            c.name.toLowerCase().includes(q) ||
+            c.email.toLowerCase().includes(q) ||
+            (c.phone || "").toLowerCase().includes(q) ||
+            (currency.enable_student_id &&
+                (c.student_id || "").toLowerCase().includes(q)) ||
+            (currency.enable_card_number &&
+                (c.card_number || "").toLowerCase().includes(q)) ||
+            (currency.enable_grade_class &&
+                (c.grade_class || "").toLowerCase().includes(q))
+        );
+    });
+
+    const selectedCustomer = customers.find(
+        (c) => String(c.id) === String(customerId),
     );
+
+    const formatCustomerExtra = (c) => {
+        const parts = [c.phone || c.email];
+        if (currency.enable_grade_class && c.grade_class)
+            parts.push(`Class: ${c.grade_class}`);
+        if (currency.enable_student_id && c.student_id)
+            parts.push(`ID: ${c.student_id}`);
+        if (currency.enable_card_number && c.card_number)
+            parts.push(`Card: ${c.card_number}`);
+        return parts.filter(Boolean).join(" • ");
+    };
 
     const addToCart = (product) => {
         setCart((prev) => {
@@ -154,7 +185,10 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
             setAppliedDiscount(res.data);
         } catch (err) {
             setAppliedDiscount(null);
-            alert(err.response?.data?.message || "Invalid discount code");
+            notify(
+                err.response?.data?.message || "Invalid discount code",
+                "error",
+            );
         }
     };
 
@@ -241,7 +275,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
             setDeliveryType("pickup");
             fetchProducts(true);
         } catch (err) {
-            alert(err.response?.data?.message || "Checkout failed");
+            notify(err.response?.data?.message || "Checkout failed", "error");
         }
     };
 
@@ -251,7 +285,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
             deliveryType === "delivery" &&
             !address.trim()
         ) {
-            alert("Please enter your delivery address");
+            notify("Please enter your delivery address", "error");
             return;
         }
         if (
@@ -389,7 +423,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                             {t("customer_staff_only")}
                         </label>
                         <input
-                            placeholder="Search customer name / phone..."
+                            placeholder="Search name, phone, student ID, card, class..."
                             value={customerSearch}
                             onChange={(e) => {
                                 setCustomerSearch(e.target.value);
@@ -400,7 +434,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                         {customerSearch &&
                             !customerId &&
                             filteredCustomers.length > 0 && (
-                                <div className="bg-white border rounded-xl max-h-36 overflow-y-auto divide-y shadow-sm">
+                                <div className="bg-white border rounded-xl max-h-40 overflow-y-auto divide-y shadow-sm">
                                     {filteredCustomers.map((c) => (
                                         <button
                                             key={c.id}
@@ -409,7 +443,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                                                 setCustomerId(String(c.id));
                                                 setCustomerName(c.name);
                                                 setCustomerSearch(
-                                                    `${c.name} (${c.phone || c.email})`,
+                                                    `${c.name} (${formatCustomerExtra(c)})`,
                                                 );
                                                 if (c.saved_address)
                                                     setAddress(c.saved_address);
@@ -420,12 +454,69 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                                                 {c.name}
                                             </div>
                                             <div className="text-slate-500">
-                                                {c.phone || c.email}
+                                                {formatCustomerExtra(c)}
                                             </div>
                                         </button>
                                     ))}
                                 </div>
                             )}
+                        <select
+                            value={customerId}
+                            onChange={(e) => {
+                                const id = e.target.value;
+                                setCustomerId(id);
+                                const found = customers.find(
+                                    (c) => String(c.id) === String(id),
+                                );
+                                if (found) {
+                                    setCustomerName(found.name);
+                                    if (found.saved_address)
+                                        setAddress(found.saved_address);
+                                }
+                            }}
+                            className="w-full p-2 border rounded-lg text-xs bg-white"
+                        >
+                            <option value="">{t("walk_in_select")}</option>
+                            {filteredCustomers.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                    {c.name} ({formatCustomerExtra(c)})
+                                </option>
+                            ))}
+                        </select>
+
+                        {selectedCustomer && (
+                            <div className="p-2.5 bg-indigo-50 border border-indigo-100 rounded-lg text-xs space-y-0.5 text-slate-700">
+                                <div className="font-bold text-indigo-700">
+                                    {selectedCustomer.name}
+                                </div>
+                                <div>
+                                    {selectedCustomer.phone ||
+                                        selectedCustomer.email}
+                                </div>
+                                {currency.enable_grade_class &&
+                                    selectedCustomer.grade_class && (
+                                        <div>
+                                            <strong>Class:</strong>{" "}
+                                            {selectedCustomer.grade_class}
+                                        </div>
+                                    )}
+                                {currency.enable_student_id &&
+                                    selectedCustomer.student_id && (
+                                        <div>
+                                            <strong>Student ID:</strong>{" "}
+                                            {selectedCustomer.student_id}
+                                        </div>
+                                    )}
+                                {currency.enable_card_number &&
+                                    selectedCustomer.card_number && (
+                                        <div>
+                                            <strong>Card No:</strong>{" "}
+                                            {selectedCustomer.card_number}
+                                        </div>
+                                    )}
+                            </div>
+                        )}
+
                         {!customerId && (
                             <input
                                 placeholder={t("walk_in_placeholder")}

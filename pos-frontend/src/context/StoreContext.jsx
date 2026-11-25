@@ -10,7 +10,14 @@ export function StoreProvider({ children }) {
     const [currency, setCurrency] = useState({
         currency_symbol: "$",
         currency_code: "USD",
+        enable_grade_class: false,
+        enable_student_id: false,
+        enable_card_number: false,
     });
+
+    const [modalMsg, setModalMsg] = useState(null);
+    const notify = (text, type = "success") => setModalMsg({ text, type });
+    const closeNotify = () => setModalMsg(null);
 
     const [loaded, setLoaded] = useState({
         products: false,
@@ -78,6 +85,9 @@ export function StoreProvider({ children }) {
                 categories,
                 customers,
                 currency,
+                modalMsg,
+                notify,
+                closeNotify,
                 fetchProducts,
                 fetchCategories,
                 fetchCustomers,

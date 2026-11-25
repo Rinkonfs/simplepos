@@ -13,6 +13,7 @@ export default function SettingsPage() {
         fetchSettings,
         customers,
         fetchCustomers,
+        notify,
     } = useStore();
 
     const [currForm, setCurrForm] = useState(currency);
@@ -48,11 +49,18 @@ export default function SettingsPage() {
         setCurrForm(currency);
     }, [currency]);
 
-    const saveCurrency = async (e) => {
+    const saveSettings = async (e) => {
         e.preventDefault();
-        await api.put("/settings", currForm);
-        await fetchSettings(true);
-        alert("Currency updated!");
+        try {
+            await api.put("/settings", currForm);
+            await fetchSettings(true);
+            notify("Settings saved successfully!", "success");
+        } catch (err) {
+            notify(
+                err.response?.data?.message || "Failed to save settings",
+                "error",
+            );
+        }
     };
 
     const saveCategory = async (e) => {
@@ -98,56 +106,114 @@ export default function SettingsPage() {
 
     return (
         <div className="space-y-6">
-            {/* Currency Settings */}
+            {/* Currency & Optional User Fields Settings */}
             <form
-                onSubmit={saveCurrency}
-                className="bg-white p-5 rounded-2xl border shadow-sm flex flex-wrap items-end gap-3"
+                onSubmit={saveSettings}
+                className="bg-white p-5 rounded-2xl border shadow-sm space-y-4"
             >
-                <div className="font-bold text-base flex items-center gap-2 w-full">
-                    <DollarSign className="w-5 h-5 text-indigo-600" /> Currency
-                    Settings
+                <div className="font-bold text-base flex items-center gap-2">
+                    <DollarSign className="w-5 h-5 text-indigo-600" /> System &
+                    Currency Settings
                 </div>
-                <div>
-                    <label className="block text-xs text-slate-500 mb-1">
-                        Currency Preset
-                    </label>
-                    <select
-                        value={`${currForm.currency_code}|${currForm.currency_symbol}`}
-                        onChange={(e) => {
-                            const [code, symbol] = e.target.value.split("|");
-                            setCurrForm({
-                                currency_code: code,
-                                currency_symbol: symbol,
-                            });
-                        }}
-                        className="p-2.5 border rounded-xl text-sm"
-                    >
-                        <option value="USD|$">USD ($)</option>
-                        <option value="IDR|Rp">IDR (Rp)</option>
-                        <option value="BDT|৳">BDT (৳)</option>
-                        <option value="EUR|€">EUR (€)</option>
-                    </select>
+
+                <div className="flex flex-wrap items-end gap-3">
+                    <div>
+                        <label className="block text-xs text-slate-500 mb-1">
+                            Currency Preset
+                        </label>
+                        <select
+                            value={`${currForm.currency_code}|${currForm.currency_symbol}`}
+                            onChange={(e) => {
+                                const [code, symbol] =
+                                    e.target.value.split("|");
+                                setCurrForm({
+                                    ...currForm,
+                                    currency_code: code,
+                                    currency_symbol: symbol,
+                                });
+                            }}
+                            className="p-2.5 border rounded-xl text-sm"
+                        >
+                            <option value="USD|$">USD ($)</option>
+                            <option value="IDR|Rp">IDR (Rp)</option>
+                            <option value="BDT|৳">BDT (৳)</option>
+                            <option value="EUR|€">EUR (€)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs text-slate-500 mb-1">
+                            Symbol
+                        </label>
+                        <input
+                            value={currForm.currency_symbol || "$"}
+                            onChange={(e) =>
+                                setCurrForm({
+                                    ...currForm,
+                                    currency_symbol: e.target.value,
+                                })
+                            }
+                            className="w-24 p-2.5 border rounded-xl text-sm"
+                        />
+                    </div>
                 </div>
-                <div>
-                    <label className="block text-xs text-slate-500 mb-1">
-                        Symbol
-                    </label>
-                    <input
-                        value={currForm.currency_symbol}
-                        onChange={(e) =>
-                            setCurrForm({
-                                ...currForm,
-                                currency_symbol: e.target.value,
-                            })
-                        }
-                        className="w-24 p-2.5 border rounded-xl text-sm"
-                    />
+
+                {/* Optional User Fields Toggles */}
+                <div className="pt-3 border-t space-y-2">
+                    <div className="text-xs font-bold text-slate-600 uppercase">
+                        Optional User Details (Unlock for Users & POS/Shop
+                        Search)
+                    </div>
+                    <div className="flex flex-wrap gap-5 text-sm">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={!!currForm.enable_grade_class}
+                                onChange={(e) =>
+                                    setCurrForm({
+                                        ...currForm,
+                                        enable_grade_class: e.target.checked,
+                                    })
+                                }
+                                className="w-4 h-4 accent-indigo-600"
+                            />
+                            Enable Grade / Class
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={!!currForm.enable_student_id}
+                                onChange={(e) =>
+                                    setCurrForm({
+                                        ...currForm,
+                                        enable_student_id: e.target.checked,
+                                    })
+                                }
+                                className="w-4 h-4 accent-indigo-600"
+                            />
+                            Enable Student ID Number
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={!!currForm.enable_card_number}
+                                onChange={(e) =>
+                                    setCurrForm({
+                                        ...currForm,
+                                        enable_card_number: e.target.checked,
+                                    })
+                                }
+                                className="w-4 h-4 accent-indigo-600"
+                            />
+                            Enable Card Number
+                        </label>
+                    </div>
                 </div>
+
                 <button
                     type="submit"
-                    className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold"
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold"
                 >
-                    Save Currency
+                    Save Settings
                 </button>
             </form>
 

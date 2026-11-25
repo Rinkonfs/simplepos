@@ -13,6 +13,7 @@ import OrdersPage from "./pages/OrdersPage";
 import ProfilePage from "./pages/ProfilePage";
 import VendorsPage from "./pages/VendorsPage";
 import AccountingPage from "./pages/AccountingPage";
+import PublicPoPage from "./pages/PublicPoPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -20,6 +21,13 @@ export default function App() {
         const saved = localStorage.getItem("user");
         return saved ? JSON.parse(saved) : null;
     });
+
+    if (window.location.pathname.startsWith("/po/")) {
+        const token = window.location.pathname
+            .replace(/\/+$/, "")
+            .split("/po/")[1];
+        return <PublicPoPage token={token} />;
+    }
 
     const handleLogout = async () => {
         try {
@@ -40,19 +48,6 @@ export default function App() {
                 <Layout user={user} onLogout={handleLogout}>
                     <Routes>
                         <Route
-                            path="/profile"
-                            element={
-                                <ProfilePage
-                                    user={user}
-                                    onUserUpdate={setUser}
-                                />
-                            }
-                        />
-                        <Route
-                            path="/orders"
-                            element={<OrdersPage user={user} />}
-                        />
-                        <Route
                             path="/shop"
                             element={
                                 <PosPage
@@ -63,7 +58,26 @@ export default function App() {
                             }
                         />
 
-                        {user.role !== "customer" && (
+                        {user.role !== "shop" && (
+                            <>
+                                <Route
+                                    path="/profile"
+                                    element={
+                                        <ProfilePage
+                                            user={user}
+                                            onUserUpdate={setUser}
+                                        />
+                                    }
+                                />
+                                <Route
+                                    path="/orders"
+                                    element={<OrdersPage user={user} />}
+                                />
+                            </>
+                        )}
+
+                        {(user.role === "super_admin" ||
+                            user.role === "seller") && (
                             <>
                                 <Route
                                     path="/pos"
@@ -105,7 +119,8 @@ export default function App() {
                             element={
                                 <Navigate
                                     to={
-                                        user.role === "customer"
+                                        user.role === "customer" ||
+                                        user.role === "shop"
                                             ? "/shop"
                                             : "/pos"
                                     }
