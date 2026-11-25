@@ -180,38 +180,53 @@ class ProductController extends Controller
 
         if ($ext === 'csv' || $ext === 'txt') {
             $handle = fopen($file->getRealPath(), 'r');
-            $header = array_map(fn($h) => strtolower(trim($h)), fgetcsv($handle));
+            $rawHeader = fgetcsv($handle);
+            if (!$rawHeader) {
+                fclose($handle);
+                return response()->json(['message' => 'CSV file is empty'], 422);
+            }
 
+            // Strip UTF-8 BOM and normalize header names
+            $header = array_map(function ($h) {
+                $h = preg_replace('/^\xEF\xBB\xBF/', '', $h);
+                return strtolower(trim($h));
+            }, $rawHeader);
+
+            $count = 0;
             while (($row = fgetcsv($handle)) !== false) {
-                if (count($row) !== count($header)) continue;
+                if (count($row) === 1 && trim((string) $row[0]) === '') continue;
+
+                // Pad or trim row to match header length
+                $row = array_pad(array_slice($row, 0, count($header)), count($header), '');
                 $data = array_combine($header, $row);
-                if (empty($data['sku'])) continue;
+                if (empty(trim($data['sku'] ?? ''))) continue;
 
                 $categoryId = null;
-                if (!empty($data['category'])) {
+                if (!empty(trim($data['category'] ?? ''))) {
                     $category = Category::firstOrCreate(['name' => trim($data['category'])]);
                     $categoryId = $category->id;
                 }
 
                 $vendorId = null;
-                if (!empty($data['vendor'])) {
+                if (!empty(trim($data['vendor'] ?? ''))) {
                     $vendor = Vendor::firstOrCreate(['name' => trim($data['vendor'])]);
                     $vendorId = $vendor->id;
                 }
 
+                $unit = strtolower(trim($data['unit'] ?? ''));
                 $product = Product::updateOrCreate(
                     ['sku' => trim($data['sku'])],
                     [
                         'category_id' => $categoryId,
                         'vendor_id' => $vendorId,
                         'name' => trim($data['name'] ?? ''),
-                        'unit' => in_array(strtolower(trim($data['unit'] ?? '')), ['pcs', 'kg', 'liter']) ? strtolower(trim($data['unit'])) : 'pcs',
+                        'unit' => in_array($unit, ['pcs', 'kg', 'liter']) ? $unit : 'pcs',
                         'cost_price' => (float) ($data['cost_price'] ?? 0),
                         'sell_price' => (float) ($data['sell_price'] ?? 0),
-                        'low_stock_alert' => (float) ($data['low_stock_alert'] ?? 5),
-                        'max_purchase_qty' => !empty($data['max_purchase_qty']) ? (float) $data['max_purchase_qty'] : null,
-                        'bulk_min_qty' => !empty($data['bulk_min_qty']) ? (float) $data['bulk_min_qty'] : null,
-                        'bulk_price' => !empty($data['bulk_price']) ? (float) $data['bulk_price'] : null,
+                       'low_stock_alert' => (float) (($data['low_stock_alert'] ?? '') !== '' ? $data['low_stock_alert'] : 5),
+                        'max_purchase_qty' => !empty(trim($data['max_purchase_qty'] ?? '')) ? (float) $data['max_purchase_qty'] : null,
+                        'bulk_min_qty' => !empty(trim($data['bulk_min_qty'] ?? '')) ? (float) $data['bulk_min_qty'] : null,
+                        'bulk_price' => !empty(trim($data['bulk_price'] ?? '')) ? (float) $data['bulk_price'] : null,
                     ]
                 );
 
@@ -226,13 +241,14 @@ class ProductController extends Controller
                         'reference' => 'Bulk CSV Import',
                     ]);
                 }
+                $count++;
             }
             fclose($handle);
-            return response()->json(['message' => 'Bulk CSV imported successfully']);
+            return response()->json(['message' => "Bulk CSV imported: {$count} products processed."]);
         }
 
         if (!class_exists(\Maatwebsite\Excel\Facades\Excel::class)) {
-            return response()->json(['message' => 'Please upload a .csv file or install maatwebsite/excel'], 422);
+            return response()->json(['message' => 'Please save your file as .csv (or install maatwebsite/excel).'], 422);
         }
 
         Excel::import(new ProductsImport, $file);
