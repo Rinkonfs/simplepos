@@ -11,7 +11,8 @@ use App\Http\Controllers\{
     ReportController,
     SettingController,
     StockMovementController,
-    VendorController
+    VendorController,
+    BackupController
 };
 use Illuminate\Support\Facades\Route;
 
@@ -57,7 +58,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Super Admin ONLY
     Route::middleware('role:super_admin')->group(function () {
         Route::delete('/products/{product}', [ProductController::class, 'destroy']);
-
+Route::delete('/products-all', [ProductController::class, 'destroyAll']);
         Route::get('/stock-movements', [StockMovementController::class, 'index']);
         Route::put('/stock-movements/{stockMovement}', [StockMovementController::class, 'update']);
         Route::delete('/stock-movements/{stockMovement}', [StockMovementController::class, 'destroy']);
@@ -90,7 +91,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/users', [AuthController::class, 'users']);
         Route::post('/users', [AuthController::class, 'storeUser']);
+        Route::post('/users/bulk-import', [AuthController::class, 'bulkImportUsers']);
         Route::post('/users/{user}', [AuthController::class, 'updateUser']);
         Route::delete('/users/{user}', [AuthController::class, 'destroyUser']);
+        Route::get('/settings/full', [SettingController::class, 'adminIndex']);
+        Route::get('/backup/export', [BackupController::class, 'exportAll']);
+        Route::post('/backup/import', [BackupController::class, 'importAll']);
+        Route::delete('/backup/wipe-data', [BackupController::class, 'wipeAllDataExceptUsers']);
+        Route::delete('/users-all', [AuthController::class, 'destroyAllUsers']);
+        Route::delete('/purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'destroy']);
     });
+
 });

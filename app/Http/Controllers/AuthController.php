@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{DB, Hash, Mail};
-
+use Illuminate\Support\Facades\Schema;
 class AuthController extends Controller
 {
     public function login(Request $request)
@@ -57,6 +57,20 @@ class AuthController extends Controller
             ['email' => $request->email],
             ['token' => Hash::make($code), 'created_at' => now()]
         );
+        $s = \App\Models\Setting::pluck('value', 'key');
+        if (!empty($s['mail_host'])) {
+            config([
+                'mail.default' => 'smtp',
+                'mail.mailers.smtp.host' => $s['mail_host'],
+                'mail.mailers.smtp.port' => (int) ($s['mail_port'] ?? 587),
+                'mail.mailers.smtp.username' => $s['mail_username'] ?? null,
+                'mail.mailers.smtp.password' => $s['mail_password'] ?? null,
+                'mail.mailers.smtp.encryption' => ($s['mail_encryption'] ?? 'tls') === 'none' ? null : ($s['mail_encryption'] ?? 'tls'),
+                'mail.from.address' => $s['mail_from_address'] ?: 'hello@example.com',
+                'mail.from.name' => $s['mail_from_name'] ?: 'StockPro POS',
+            ]);
+        }
+
 
         Mail::raw("Your StockPro POS password reset code is: {$code}", function ($m) use ($request) {
             $m->to($request->email)->subject('Password Reset Code');
@@ -126,14 +140,29 @@ class AuthController extends Controller
         return response()->json($request->user());
     }
 
-    public function customers()
+    public function customers(Request $request)
     {
-        return response()->json(
-            User::where('role', 'customer')
-                ->select('id', 'name', 'email', 'phone', 'saved_address', 'grade_class', 'student_id', 'card_number')
-                ->orderBy('name')
-                ->get()
-        );
+        $isShop = $request->user()->role === 'shop';
+        $q = trim((string) $request->get('q', ''));
+
+        $query = User::where('role', 'customer');
+
+        if ($q !== '') {
+            $query->where(function ($sub) use ($q) {
+                $sub->where('name', 'like', "%{$q}%")
+                    ->orWhere('student_id', 'like', "%{$q}%")
+                    ->orWhere('card_number', 'like', "%{$q}%")
+                    ->orWhere('grade_class', 'like', "%{$q}%")
+                    ->orWhere('phone', 'like', "%{$q}%");
+            });
+        }
+
+        // Shop user can search by ID/card/phone on the server, but NEVER receives them in JSON
+        $columns = $isShop
+            ? ['id', 'name', 'grade_class']
+            : ['id', 'name', 'email', 'phone', 'saved_address', 'grade_class', 'student_id', 'card_number'];
+
+        return response()->json($query->select($columns)->orderBy('name')->get());
     }
 
     public function users()
@@ -206,5 +235,71 @@ class AuthController extends Controller
         }
         $user->delete();
         return response()->json(['message' => 'User deleted']);
+    }
+    public function bulkImportUsers(Request $request)
+    {
+        $request->validate(['file' => 'required|mimes:csv,txt']);
+        $path = $request->file('file')->getRealPath();
+        $firstLine = fgets(fopen($path, 'r'));
+        $delimiter = (substr_count($firstLine, ';') > substr_count($firstLine, ',')) ? ';' : ',';
+
+        $handle = fopen($path, 'r');
+        $rawHeader = fgetcsv($handle, 0, $delimiter);
+        if (!$rawHeader) {
+            fclose($handle);
+            return response()->json(['message' => 'CSV file is empty'], 422);
+        }
+
+        $header = array_map(function ($h) {
+            $h = preg_replace('/^\xEF\xBB\xBF/', '', $h);
+            return str_replace(' ', '_', strtolower(trim($h)));
+        }, $rawHeader);
+
+        $count = 0;
+        while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
+            if (count($row) === 1 && trim((string) $row[0]) === '') continue;
+            $row = array_pad(array_slice($row, 0, count($header)), count($header), '');
+            $data = array_combine($header, $row);
+
+            $email = trim($data['email'] ?? '');
+            if ($email === '') continue;
+
+            $role = strtolower(trim($data['role'] ?? 'customer'));
+            if (!in_array($role, ['super_admin', 'seller', 'customer', 'shop'])) {
+                $role = 'customer';
+            }
+
+            $existing = User::where('email', $email)->first();
+            $payload = [
+                'name' => trim($data['name'] ?? ($existing?->name ?? 'User')),
+                'phone' => trim($data['phone'] ?? '') ?: $existing?->phone,
+                'role' => $role,
+                'saved_address' => trim($data['saved_address'] ?? '') ?: $existing?->saved_address,
+                'grade_class' => trim($data['grade_class'] ?? '') ?: $existing?->grade_class,
+                'student_id' => trim($data['student_id'] ?? '') ?: $existing?->student_id,
+                'card_number' => trim($data['card_number'] ?? '') ?: $existing?->card_number,
+            ];
+
+            if (!empty(trim($data['password'] ?? ''))) {
+                $payload['password'] = Hash::make(trim($data['password']));
+            } elseif (!$existing) {
+                $payload['password'] = Hash::make('password');
+            }
+
+            User::updateOrCreate(['email' => $email], $payload);
+            $count++;
+        }
+
+        fclose($handle);
+        return response()->json(['message' => "Imported/updated {$count} users successfully!"]);
+    }
+
+    public function destroyAllUsers(Request $request)
+    {
+        Schema::disableForeignKeyConstraints();
+        User::where('id', '!=', $request->user()->id)->delete();
+        Schema::enableForeignKeyConstraints();
+
+        return response()->json(['message' => 'All other users deleted (your current Super Admin account was kept).']);
     }
 }

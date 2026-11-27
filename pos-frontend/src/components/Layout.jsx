@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Maximize } from 'lucide-react';
 import {
     ShoppingCart,
     Package,
@@ -69,6 +70,72 @@ export default function Layout({ user, onLogout, children }) {
         customer: "bg-emerald-100 text-emerald-700",
         shop: "bg-amber-100 text-amber-700",
     };
+if (user?.role === 'shop') {
+    const toggleFullscreen = () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().catch(() => {});
+      } else {
+        document.exitFullscreen?.().catch(() => {});
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-800">
+        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 py-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold">
+              S
+            </div>
+            <span className="font-bold text-base text-slate-900">{t('app_name')} — Kiosk</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-lg">
+              <Globe className="w-4 h-4 text-slate-500" />
+              <select
+                value={i18n.language}
+                onChange={(e) => changeLang(e.target.value)}
+                className="text-xs font-medium bg-transparent focus:outline-none cursor-pointer"
+              >
+                <option value="en">EN</option>
+                <option value="id">ID</option>
+                <option value="bn">বাংলা</option>
+              </select>
+            </div>
+
+            <button
+              onClick={toggleFullscreen}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 text-xs font-semibold"
+              title="Toggle Fullscreen"
+            >
+              <Maximize className="w-4 h-4" /> Fullscreen
+            </button>
+
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 text-xs font-semibold"
+            >
+              <LogOut className="w-4 h-4" /> {t('logout')}
+            </button>
+          </div>
+        </header>
+
+        <main className="w-full p-3 sm:p-5">{children}</main>
+
+        {modalMsg && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl">
+              <div className={`w-12 h-12 mx-auto rounded-full flex items-center justify-center font-bold text-xl ${modalMsg.type === 'error' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                {modalMsg.type === 'error' ? '!' : '✓'}
+              </div>
+              <p className="text-sm font-medium text-slate-800">{modalMsg.text}</p>
+              <button onClick={closeNotify} className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold">OK</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 pb-24 md:pb-8">

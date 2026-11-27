@@ -25,6 +25,8 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
     const { t } = useTranslation();
     const location = useLocation();
     const isStaff = ["super_admin", "seller", "shop"].includes(user?.role);
+    const isShopOnly = user?.role === "shop";
+
     const {
         products,
         customers,
@@ -41,6 +43,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
     const [editingOrder, setEditingOrder] = useState(null);
 
     const [customerSearch, setCustomerSearch] = useState("");
+    const [shopCustomers, setShopCustomers] = useState([]);
     const [customerId, setCustomerId] = useState("");
     const [customerName, setCustomerName] = useState("");
     const [adjustment, setAdjustment] = useState(0);
@@ -60,8 +63,22 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
     useEffect(() => {
         fetchProducts();
         fetchSettings();
-        if (isStaff) fetchCustomers();
-    }, [fetchProducts, fetchSettings, fetchCustomers, isStaff]);
+        if (isStaff && !isShopOnly) fetchCustomers();
+    }, [fetchProducts, fetchSettings, fetchCustomers, isStaff, isShopOnly]);
+
+    useEffect(() => {
+        if (!isShopOnly) return;
+        if (!customerSearch.trim()) {
+            setShopCustomers([]);
+            return;
+        }
+        const timer = setTimeout(() => {
+            api.get(`/customers?q=${encodeURIComponent(customerSearch)}`).then(
+                (r) => setShopCustomers(r.data),
+            );
+        }, 250);
+        return () => clearTimeout(timer);
+    }, [customerSearch, isShopOnly]);
 
     useEffect(() => {
         if (user?.saved_address && !address) {
@@ -74,10 +91,18 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
             ? Math.min(Number(p.stock_qty), Number(p.max_purchase_qty))
             : Number(p.stock_qty);
 
-    const getUnitPrice = (p, qty) =>
-        p.bulk_min_qty && p.bulk_price && qty >= Number(p.bulk_min_qty)
+    const getUnitPrice = (p, qty, selectedPrice = null) => {
+        if (
+            selectedPrice !== null &&
+            selectedPrice !== undefined &&
+            selectedPrice !== ""
+        ) {
+            return Number(selectedPrice);
+        }
+        return p.bulk_min_qty && p.bulk_price && qty >= Number(p.bulk_min_qty)
             ? Number(p.bulk_price)
             : Number(p.sell_price);
+    };
 
     const startEditingOrder = (order) => {
         setEditingOrder(order);
@@ -95,6 +120,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                             Number(live?.stock_qty || 0) + Number(i.quantity),
                     },
                     qty: Number(i.quantity),
+                    selectedPrice: null,
                 };
             }),
         );
@@ -131,11 +157,17 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
         );
     });
 
-    const selectedCustomer = customers.find(
+    const displayCustomers = isShopOnly ? shopCustomers : filteredCustomers;
+    const selectedCustomer = (isShopOnly ? shopCustomers : customers).find(
         (c) => String(c.id) === String(customerId),
     );
 
     const formatCustomerExtra = (c) => {
+        if (isShopOnly) {
+            return currency.enable_grade_class && c.grade_class
+                ? `Class: ${c.grade_class}`
+                : "";
+        }
         const parts = [c.phone || c.email];
         if (currency.enable_grade_class && c.grade_class)
             parts.push(`Class: ${c.grade_class}`);
@@ -158,7 +190,10 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                         : i,
                 );
             }
-            return [...prev, { product, qty: Math.min(1, limit) }];
+            return [
+                ...prev,
+                { product, qty: Math.min(1, limit), selectedPrice: null },
+            ];
         });
     };
 
@@ -171,6 +206,20 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
             prev.map((i) =>
                 i.product.id === productId
                     ? { ...i, qty: Math.min(newQty, maxAllowed(i.product)) }
+                    : i,
+            ),
+        );
+    };
+
+    const selectBatchPrice = (productId, priceVal) => {
+        setCart((prev) =>
+            prev.map((i) =>
+                i.product.id === productId
+                    ? {
+                          ...i,
+                          selectedPrice:
+                              priceVal === "" ? null : Number(priceVal),
+                      }
                     : i,
             ),
         );
@@ -193,7 +242,8 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
     };
 
     const subtotal = cart.reduce(
-        (sum, i) => sum + getUnitPrice(i.product, i.qty) * i.qty,
+        (sum, i) =>
+            sum + getUnitPrice(i.product, i.qty, i.selectedPrice) * i.qty,
         0,
     );
     let discountAmt = appliedDiscount
@@ -249,6 +299,9 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                     items: cart.map((i) => ({
                         product_id: i.product.id,
                         quantity: i.qty,
+                        ...(isStaff && i.selectedPrice !== null
+                            ? { unit_price: i.selectedPrice }
+                            : {}),
                     })),
                 });
             }
@@ -269,6 +322,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
             setCodeInput("");
             setAdjustment(0);
             setCustomerSearch("");
+            setShopCustomers([]);
             setCustomerId("");
             setCustomerName("");
             setPaymentMethod("cash");
@@ -309,10 +363,19 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
             )
             .join("");
         const win = window.open("", "_blank", "width=400,height=600");
+        if (!win) {
+            notify("Please allow pop-ups to print the invoice.", "error");
+            return;
+        }
+        win.document.open();
         win.document.write(
-            `<html><head><title>Invoice ${o.order_number}</title><style>body{font-family:sans-serif;padding:20px;font-size:13px}h2{text-align:center;margin-bottom:4px}p{text-align:center;color:#555;margin:2px 0;font-size:12px}table{width:100%;border-collapse:collapse;margin:16px 0}td{padding:6px 0;border-bottom:1px dashed #ddd}.total{font-weight:bold;font-size:16px;border-top:2px solid #000;padding-top:8px;display:flex;justify-content:space-between}</style></head><body><h2>INVOICE</h2><p>${o.order_number}</p><p>${new Date(o.created_at).toLocaleString()}</p><p>Customer: ${o.customer_name || o.user?.name || "Walk-in"}</p><p>Payment: ${formatPayment(o.payment_method)} (${(o.payment_status || "unpaid").toUpperCase()})</p><table>${rows}</table>${Number(o.discount_amount) > 0 ? `<div style="display:flex;justify-content:space-between"><span>Discount (${o.discount_code})</span><span>-${sym}${o.discount_amount}</span></div>` : ""}${Number(o.adjustment_amount) !== 0 ? `<div style="display:flex;justify-content:space-between"><span>Adjustment</span><span>${sym}${o.adjustment_amount}</span></div>` : ""}<div class="total"><span>Total</span><span>${sym}${o.total_amount}</span></div><script>window.onload=()=>{window.print();window.close()}</script></body></html>`,
+            `<!DOCTYPE html><html><head><title>Invoice ${o.order_number}</title><style>body{font-family:sans-serif;padding:20px;font-size:13px}h2{text-align:center;margin-bottom:4px}p{text-align:center;color:#555;margin:2px 0;font-size:12px}table{width:100%;border-collapse:collapse;margin:16px 0}td{padding:6px 0;border-bottom:1px dashed #ddd}.total{font-weight:bold;font-size:16px;border-top:2px solid #000;padding-top:8px;display:flex;justify-content:space-between}</style></head><body><h2>INVOICE</h2><p>${o.order_number}</p><p>${new Date(o.created_at).toLocaleString()}</p><p>Customer: ${o.customer_name || o.user?.name || "Walk-in"}</p><p>Payment: ${formatPayment(o.payment_method)} (${(o.payment_status || "unpaid").toUpperCase()})</p><table>${rows}</table>${Number(o.discount_amount) > 0 ? `<div style="display:flex;justify-content:space-between"><span>Discount (${o.discount_code})</span><span>-${sym}${o.discount_amount}</span></div>` : ""}${Number(o.adjustment_amount) !== 0 ? `<div style="display:flex;justify-content:space-between"><span>Adjustment</span><span>${sym}${o.adjustment_amount}</span></div>` : ""}<div class="total"><span>Total</span><span>${sym}${o.total_amount}</span></div></body></html>`,
         );
         win.document.close();
+        setTimeout(() => {
+            win.focus();
+            win.print();
+        }, 250);
     };
 
     const shareInvoice = (o) => {
@@ -339,11 +402,32 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
             <div className="lg:col-span-2 space-y-4">
                 <input
                     type="text"
+                    autoFocus={channel === "pos"}
                     placeholder={t("search_products")}
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter" && search.trim()) {
+                            e.preventDefault();
+                            const match = products.find(
+                                (p) =>
+                                    p.sku.toLowerCase() ===
+                                    search.trim().toLowerCase(),
+                            );
+                            if (match && Number(match.stock_qty) > 0) {
+                                addToCart(match);
+                                setSearch("");
+                            } else {
+                                notify(
+                                    "Product not found or out of stock",
+                                    "error",
+                                );
+                            }
+                        }
+                    }}
                     className="w-full p-3 rounded-xl border border-slate-200 bg-white text-sm"
                 />
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {filteredProducts.map((p) => (
                         <button
@@ -423,7 +507,7 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                             {t("customer_staff_only")}
                         </label>
                         <input
-                            placeholder="Search name, phone, student ID, card, class..."
+                            placeholder="Search name, student ID, card, class..."
                             value={customerSearch}
                             onChange={(e) => {
                                 setCustomerSearch(e.target.value);
@@ -433,66 +517,83 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                         />
                         {customerSearch &&
                             !customerId &&
-                            filteredCustomers.length > 0 && (
+                            displayCustomers.length > 0 && (
                                 <div className="bg-white border rounded-xl max-h-40 overflow-y-auto divide-y shadow-sm">
-                                    {filteredCustomers.map((c) => (
-                                        <button
-                                            key={c.id}
-                                            type="button"
-                                            onClick={() => {
-                                                setCustomerId(String(c.id));
-                                                setCustomerName(c.name);
-                                                setCustomerSearch(
-                                                    `${c.name} (${formatCustomerExtra(c)})`,
-                                                );
-                                                if (c.saved_address)
-                                                    setAddress(c.saved_address);
-                                            }}
-                                            className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50"
-                                        >
-                                            <div className="font-semibold">
-                                                {c.name}
-                                            </div>
-                                            <div className="text-slate-500">
-                                                {formatCustomerExtra(c)}
-                                            </div>
-                                        </button>
-                                    ))}
+                                    {displayCustomers.map((c) => {
+                                        const extra = formatCustomerExtra(c);
+                                        return (
+                                            <button
+                                                key={c.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    setCustomerId(String(c.id));
+                                                    setCustomerName(c.name);
+                                                    setCustomerSearch(
+                                                        isShopOnly
+                                                            ? c.name
+                                                            : `${c.name} (${extra})`,
+                                                    );
+                                                    if (
+                                                        !isShopOnly &&
+                                                        c.saved_address
+                                                    )
+                                                        setAddress(
+                                                            c.saved_address,
+                                                        );
+                                                }}
+                                                className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50"
+                                            >
+                                                <div className="font-semibold">
+                                                    {c.name}
+                                                </div>
+                                                {extra && (
+                                                    <div className="text-slate-500">
+                                                        {extra}
+                                                    </div>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             )}
-                        <select
-                            value={customerId}
-                            onChange={(e) => {
-                                const id = e.target.value;
-                                setCustomerId(id);
-                                const found = customers.find(
-                                    (c) => String(c.id) === String(id),
-                                );
-                                if (found) {
-                                    setCustomerName(found.name);
-                                    if (found.saved_address)
-                                        setAddress(found.saved_address);
-                                }
-                            }}
-                            className="w-full p-2 border rounded-lg text-xs bg-white"
-                        >
-                            <option value="">{t("walk_in_select")}</option>
-                            {filteredCustomers.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                    {c.name} ({formatCustomerExtra(c)})
-                                </option>
-                            ))}
-                        </select>
+
+                        {!isShopOnly && (
+                            <select
+                                value={customerId}
+                                onChange={(e) => {
+                                    const id = e.target.value;
+                                    setCustomerId(id);
+                                    const found = customers.find(
+                                        (c) => String(c.id) === String(id),
+                                    );
+                                    if (found) {
+                                        setCustomerName(found.name);
+                                        if (found.saved_address)
+                                            setAddress(found.saved_address);
+                                    }
+                                }}
+                                className="w-full p-2 border rounded-lg text-xs bg-white"
+                            >
+                                <option value="">{t("walk_in_select")}</option>
+                                {displayCustomers.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name} ({formatCustomerExtra(c)})
+                                    </option>
+                                ))}
+                            </select>
+                        )}
 
                         {selectedCustomer && (
                             <div className="p-2.5 bg-indigo-50 border border-indigo-100 rounded-lg text-xs space-y-0.5 text-slate-700">
                                 <div className="font-bold text-indigo-700">
                                     {selectedCustomer.name}
                                 </div>
-                                <div>
-                                    {selectedCustomer.phone ||
-                                        selectedCustomer.email}
-                                </div>
+                                {!isShopOnly && (
+                                    <div>
+                                        {selectedCustomer.phone ||
+                                            selectedCustomer.email}
+                                    </div>
+                                )}
                                 {currency.enable_grade_class &&
                                     selectedCustomer.grade_class && (
                                         <div>
@@ -500,14 +601,16 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                                             {selectedCustomer.grade_class}
                                         </div>
                                     )}
-                                {currency.enable_student_id &&
+                                {!isShopOnly &&
+                                    currency.enable_student_id &&
                                     selectedCustomer.student_id && (
                                         <div>
                                             <strong>Student ID:</strong>{" "}
                                             {selectedCustomer.student_id}
                                         </div>
                                     )}
-                                {currency.enable_card_number &&
+                                {!isShopOnly &&
+                                    currency.enable_card_number &&
                                     selectedCustomer.card_number && (
                                         <div>
                                             <strong>Card No:</strong>{" "}
@@ -540,92 +643,133 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                             const unitPrice = getUnitPrice(
                                 item.product,
                                 item.qty,
+                                item.selectedPrice,
                             );
                             const isBulk =
+                                item.selectedPrice === null &&
                                 unitPrice < Number(item.product.sell_price);
+                            const hasBatches =
+                                isStaff &&
+                                item.product.batches &&
+                                item.product.batches.length > 0;
+
                             return (
                                 <div
                                     key={item.product.id}
-                                    className="flex items-center justify-between gap-2 text-sm border-b pb-3"
+                                    className="space-y-1.5 border-b pb-3"
                                 >
-                                    <div className="min-w-0 flex-1">
-                                        <div className="font-medium truncate">
-                                            {item.product.name}
-                                            {isBulk && (
-                                                <span className="ml-1 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">
-                                                    Bulk!
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div className="text-xs text-slate-500">
-                                            {sym}
-                                            {unitPrice} × {item.qty}{" "}
-                                            {item.product.unit} ={" "}
-                                            <span className="font-semibold text-indigo-600">
-                                                {sym}
-                                                {(unitPrice * item.qty).toFixed(
-                                                    2,
+                                    <div className="flex items-center justify-between gap-2 text-sm">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="font-medium truncate">
+                                                {item.product.name}
+                                                {isBulk && (
+                                                    <span className="ml-1 text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">
+                                                        Bulk!
+                                                    </span>
                                                 )}
-                                            </span>
+                                            </div>
+                                            <div className="text-xs text-slate-500">
+                                                {sym}
+                                                {unitPrice} × {item.qty}{" "}
+                                                {item.product.unit} ={" "}
+                                                <span className="font-semibold text-indigo-600">
+                                                    {sym}
+                                                    {(
+                                                        unitPrice * item.qty
+                                                    ).toFixed(2)}
+                                                </span>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                updateQty(
-                                                    item.product.id,
-                                                    item.qty - 1,
-                                                )
-                                            }
-                                            className="p-1 rounded-lg bg-slate-100"
-                                        >
-                                            <Minus className="w-3.5 h-3.5" />
-                                        </button>
-                                        <input
-                                            type="number"
-                                            step="0.01"
-                                            min="0.01"
-                                            max={maxAllowed(item.product)}
-                                            value={item.qty}
-                                            onChange={(e) => {
-                                                const val = parseFloat(
-                                                    e.target.value,
-                                                );
-                                                if (!isNaN(val))
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                type="button"
+                                                onClick={() =>
                                                     updateQty(
                                                         item.product.id,
-                                                        Math.max(0.01, val),
+                                                        item.qty - 1,
+                                                    )
+                                                }
+                                                className="p-1 rounded-lg bg-slate-100"
+                                            >
+                                                <Minus className="w-3.5 h-3.5" />
+                                            </button>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                min="0.01"
+                                                max={maxAllowed(item.product)}
+                                                value={item.qty}
+                                                onChange={(e) => {
+                                                    const val = parseFloat(
+                                                        e.target.value,
                                                     );
-                                            }}
-                                            className="w-14 text-center font-semibold text-xs p-1 border border-slate-200 rounded-lg"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                updateQty(
+                                                    if (!isNaN(val))
+                                                        updateQty(
+                                                            item.product.id,
+                                                            Math.max(0.01, val),
+                                                        );
+                                                }}
+                                                className="w-14 text-center font-semibold text-xs p-1 border border-slate-200 rounded-lg"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    updateQty(
+                                                        item.product.id,
+                                                        item.qty + 1,
+                                                    )
+                                                }
+                                                disabled={
+                                                    item.qty >=
+                                                    maxAllowed(item.product)
+                                                }
+                                                className="p-1 rounded-lg bg-slate-100 disabled:opacity-40"
+                                            >
+                                                <Plus className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    updateQty(
+                                                        item.product.id,
+                                                        0,
+                                                    )
+                                                }
+                                                className="p-1 rounded-lg text-red-500 hover:bg-red-50 ml-0.5"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Batch / Price Selector */}
+                                    {hasBatches && (
+                                        <select
+                                            value={item.selectedPrice ?? ""}
+                                            onChange={(e) =>
+                                                selectBatchPrice(
                                                     item.product.id,
-                                                    item.qty + 1,
+                                                    e.target.value,
                                                 )
                                             }
-                                            disabled={
-                                                item.qty >=
-                                                maxAllowed(item.product)
-                                            }
-                                            className="p-1 rounded-lg bg-slate-100 disabled:opacity-40"
+                                            className="w-full p-1.5 border rounded-lg text-[11px] bg-slate-50 text-slate-700"
                                         >
-                                            <Plus className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                updateQty(item.product.id, 0)
-                                            }
-                                            className="p-1 rounded-lg text-red-500 hover:bg-red-50 ml-0.5"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
-                                    </div>
+                                            <option value="">
+                                                Standard Price ({sym}
+                                                {item.product.sell_price})
+                                            </option>
+                                            {item.product.batches.map((b) => (
+                                                <option
+                                                    key={b.id}
+                                                    value={b.sell_price}
+                                                >
+                                                    Batch: {b.label} — {sym}
+                                                    {b.sell_price} (Qty:{" "}
+                                                    {b.stock_qty})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
                                 </div>
                             );
                         })}
@@ -912,16 +1056,17 @@ export default function PosPage({ channel = "pos", user, onUserUpdate }) {
                             >
                                 <Share2 className="w-3.5 h-3.5" /> Share
                             </button>
-                            {invoiceOrder.status === "pending" && (
-                                <button
-                                    onClick={() =>
-                                        startEditingOrder(invoiceOrder)
-                                    }
-                                    className="py-2 bg-amber-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"
-                                >
-                                    <Edit2 className="w-3.5 h-3.5" /> Edit
-                                </button>
-                            )}
+                            {!isShopOnly &&
+                                invoiceOrder.status === "pending" && (
+                                    <button
+                                        onClick={() =>
+                                            startEditingOrder(invoiceOrder)
+                                        }
+                                        className="py-2 bg-amber-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"
+                                    >
+                                        <Edit2 className="w-3.5 h-3.5" /> Edit
+                                    </button>
+                                )}
                             <button
                                 onClick={() => setInvoiceOrder(null)}
                                 className="py-2 border rounded-xl text-xs font-semibold"

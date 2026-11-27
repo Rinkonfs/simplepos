@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\{PurchaseOrder, StockMovement, VendorPayment};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class PurchaseOrderController extends Controller
@@ -121,14 +122,16 @@ class PurchaseOrderController extends Controller
         return DB::transaction(function () use ($request, $purchaseOrder) {
             if ($request->status === 'received' && $purchaseOrder->status !== 'received') {
                 foreach ($purchaseOrder->items as $item) {
-                    $item->product->increment('stock_qty', $item->quantity);
-                    StockMovement::create([
-                        'product_id' => $item->product_id,
-                        'user_id' => $request->user()->id,
-                        'type' => 'in',
-                        'quantity' => $item->quantity,
-                        'reference' => "PO #{$purchaseOrder->po_number}",
-                    ]);
+                    if ($item->product) {
+                        $item->product->increment('stock_qty', $item->quantity);
+                        StockMovement::create([
+                            'product_id' => $item->product_id,
+                            'user_id' => $request->user()->id,
+                            'type' => 'in',
+                            'quantity' => $item->quantity,
+                            'reference' => "PO #{$purchaseOrder->po_number}",
+                        ]);
+                    }
                 }
             }
 
@@ -162,5 +165,16 @@ class PurchaseOrderController extends Controller
 
         $purchaseOrder->increment('paid_amount', $data['amount']);
         return response()->json($purchaseOrder->load(['vendor', 'items.product', 'payments']));
+    }
+
+    public function destroy(PurchaseOrder $purchaseOrder)
+    {
+        Schema::disableForeignKeyConstraints();
+        $purchaseOrder->payments()->delete();
+        $purchaseOrder->items()->delete();
+        $purchaseOrder->delete();
+        Schema::enableForeignKeyConstraints();
+
+        return response()->json(['message' => 'Purchase Order deleted']);
     }
 }

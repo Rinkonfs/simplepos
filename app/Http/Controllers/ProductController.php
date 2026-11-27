@@ -9,6 +9,9 @@ use App\Models\StockMovement;
 use App\Models\Vendor;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Facades\Excel;
+use App\Models\ProductBatch;
+use Illuminate\Support\Facades\Schema;
+
 
 class ProductController extends Controller
 {
@@ -168,8 +171,23 @@ class ProductController extends Controller
 
     public function destroy(Product $product)
     {
+        Schema::disableForeignKeyConstraints();
+        $product->batches()->delete();
+        $product->movements()->delete();
         $product->delete();
+        Schema::enableForeignKeyConstraints();
+
         return response()->json(['message' => 'Product deleted']);
+    }
+    public function destroyAll()
+    {
+        Schema::disableForeignKeyConstraints();
+        ProductBatch::query()->delete();
+        StockMovement::query()->delete();
+        Product::query()->delete();
+        Schema::enableForeignKeyConstraints();
+
+        return response()->json(['message' => 'All stock products have been deleted']);
     }
 
     public function bulkUpload(Request $request)
@@ -179,27 +197,33 @@ class ProductController extends Controller
         $ext = strtolower($file->getClientOriginalExtension());
 
         if ($ext === 'csv' || $ext === 'txt') {
-            $handle = fopen($file->getRealPath(), 'r');
-            $rawHeader = fgetcsv($handle);
+            $path = $file->getRealPath();
+            $firstLine = fgets(fopen($path, 'r'));
+            $delimiter = (substr_count($firstLine, ';') > substr_count($firstLine, ',')) ? ';' : ',';
+
+            $handle = fopen($path, 'r');
+            $rawHeader = fgetcsv($handle, 0, $delimiter);
             if (!$rawHeader) {
                 fclose($handle);
                 return response()->json(['message' => 'CSV file is empty'], 422);
             }
 
-            // Strip UTF-8 BOM and normalize header names
+            // Strip UTF-8 BOM, trim, lowercase, and convert spaces to underscores
             $header = array_map(function ($h) {
                 $h = preg_replace('/^\xEF\xBB\xBF/', '', $h);
-                return strtolower(trim($h));
+                return str_replace(' ', '_', strtolower(trim($h)));
             }, $rawHeader);
 
+            $num = fn ($val, $default = 0) => is_numeric($clean = preg_replace('/[^0-9.\-]/', '', (string) $val)) ? (float) $clean : $default;
+
             $count = 0;
-            while (($row = fgetcsv($handle)) !== false) {
+            while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
                 if (count($row) === 1 && trim((string) $row[0]) === '') continue;
 
-                // Pad or trim row to match header length
                 $row = array_pad(array_slice($row, 0, count($header)), count($header), '');
                 $data = array_combine($header, $row);
-                if (empty(trim($data['sku'] ?? ''))) continue;
+                $sku = trim($data['sku'] ?? '');
+                if ($sku === '') continue;
 
                 $categoryId = null;
                 if (!empty(trim($data['category'] ?? ''))) {
@@ -214,23 +238,24 @@ class ProductController extends Controller
                 }
 
                 $unit = strtolower(trim($data['unit'] ?? ''));
-                $product = Product::updateOrCreate(
-                    ['sku' => trim($data['sku'])],
-                    [
-                        'category_id' => $categoryId,
-                        'vendor_id' => $vendorId,
-                        'name' => trim($data['name'] ?? ''),
-                        'unit' => in_array($unit, ['pcs', 'kg', 'liter']) ? $unit : 'pcs',
-                        'cost_price' => (float) ($data['cost_price'] ?? 0),
-                        'sell_price' => (float) ($data['sell_price'] ?? 0),
-                       'low_stock_alert' => (float) (($data['low_stock_alert'] ?? '') !== '' ? $data['low_stock_alert'] : 5),
-                        'max_purchase_qty' => !empty(trim($data['max_purchase_qty'] ?? '')) ? (float) $data['max_purchase_qty'] : null,
-                        'bulk_min_qty' => !empty(trim($data['bulk_min_qty'] ?? '')) ? (float) $data['bulk_min_qty'] : null,
-                        'bulk_price' => !empty(trim($data['bulk_price'] ?? '')) ? (float) $data['bulk_price'] : null,
-                    ]
-                );
+                $qty = $num($data['stock_qty'] ?? 0, 0);
 
-                $qty = (float) ($data['stock_qty'] ?? 0);
+                $existing = Product::where('sku', $sku)->first();
+                $payload = [
+                    'category_id' => $categoryId ?? $existing?->category_id,
+                    'vendor_id' => $vendorId ?? $existing?->vendor_id,
+                    'name' => trim($data['name'] ?? '') ?: ($existing?->name ?? $sku),
+                    'unit' => in_array($unit, ['pcs', 'kg', 'liter']) ? $unit : ($existing?->unit ?? 'pcs'),
+                    'cost_price' => isset($data['cost_price']) && $data['cost_price'] !== '' ? $num($data['cost_price']) : ($existing?->cost_price ?? 0),
+                    'sell_price' => isset($data['sell_price']) && $data['sell_price'] !== '' ? $num($data['sell_price']) : ($existing?->sell_price ?? 0),
+                    'low_stock_alert' => ($data['low_stock_alert'] ?? '') !== '' ? $num($data['low_stock_alert'], 5) : ($existing?->low_stock_alert ?? 5),
+                    'max_purchase_qty' => ($data['max_purchase_qty'] ?? '') !== '' ? $num($data['max_purchase_qty']) : null,
+                    'bulk_min_qty' => ($data['bulk_min_qty'] ?? '') !== '' ? $num($data['bulk_min_qty']) : null,
+                    'bulk_price' => ($data['bulk_price'] ?? '') !== '' ? $num($data['bulk_price']) : null,
+                ];
+
+                $product = Product::updateOrCreate(['sku' => $sku], $payload);
+
                 if ($qty > 0) {
                     $product->increment('stock_qty', $qty);
                     StockMovement::create([

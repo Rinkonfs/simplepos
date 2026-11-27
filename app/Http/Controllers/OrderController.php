@@ -175,7 +175,7 @@ class OrderController extends Controller
         $request->validate([
             'delivery_type' => 'required|in:pickup,delivery',
             'shipping_address' => 'nullable|string',
-            'status' => $isCustomer ? 'nullable' : 'required|in:pending,accepted,completed,rejected',
+            'status' => $isCustomer ? 'nullable' : 'required|in:pending,accepted,ready_for_delivery,shipped,completed,rejected',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.quantity' => 'required|numeric|min:0.01',
@@ -244,7 +244,9 @@ class OrderController extends Controller
 
     public function updateStatus(Request $request, Order $order)
     {
-        $request->validate(['status' => 'required|in:accepted,rejected,completed']);
+        $request->validate([
+    'status' => 'required|in:accepted,rejected,ready_for_delivery,shipped,completed',
+]);
 
         if ($order->status !== 'pending' && $request->status === 'rejected') {
             return response()->json(['message' => 'Only pending orders can be rejected'], 422);
@@ -280,6 +282,12 @@ class OrderController extends Controller
         if (!in_array($order->status, ['pending', 'accepted'])) {
             return response()->json(['message' => 'Order cannot be cancelled'], 422);
         }
+        if (in_array($order->status, ['shipped', 'completed'])) {
+    return response()->json(['message' => 'Shipped or delivered orders cannot be cancelled'], 422);
+}
+if (!in_array($order->status, ['pending', 'accepted', 'ready_for_delivery'])) {
+    return response()->json(['message' => 'Order cannot be cancelled'], 422);
+}
 
         return DB::transaction(function () use ($request, $order) {
             foreach ($order->items as $item) {
@@ -310,19 +318,22 @@ class OrderController extends Controller
         }
 
         return DB::transaction(function () use ($request, $order) {
-            if (in_array($order->status, ['pending', 'accepted'])) {
+            if (in_array($order->status, ['pending', 'accepted', 'ready_for_delivery', 'shipped'])) {
                 foreach ($order->items as $item) {
-                    $item->product->increment('stock_qty', $item->quantity);
-                    StockMovement::create([
-                        'product_id' => $item->product_id,
-                        'user_id' => $request->user()->id,
-                        'type' => 'in',
-                        'quantity' => $item->quantity,
-                        'reference' => "Deleted Order #{$order->order_number}",
-                    ]);
+                    if ($item->product) {
+                        $item->product->increment('stock_qty', $item->quantity);
+                        StockMovement::create([
+                            'product_id' => $item->product_id,
+                            'user_id' => $request->user()->id,
+                            'type' => 'in',
+                            'quantity' => $item->quantity,
+                            'reference' => "Deleted Order #{$order->order_number}",
+                        ]);
+                    }
                 }
             }
 
+            $order->items()->delete();
             $order->delete();
             return response()->json(['message' => 'Order deleted']);
         });

@@ -29,6 +29,9 @@ export default function LoginPage({ onLogin }) {
                 localStorage.setItem("token", res.data.token);
                 localStorage.setItem("user", JSON.stringify(res.data.user));
                 onLogin(res.data.user);
+                if (res.data.user?.role === 'shop' && document.documentElement.requestFullscreen) {
+  document.documentElement.requestFullscreen().catch(() => {});
+}
             } else if (mode === "forgot") {
                 const res = await api.post("/forgot-password", { email });
                 setInfo(res.data.message);

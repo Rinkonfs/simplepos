@@ -133,6 +133,38 @@ export default function StockPage({ user }) {
         );
     };
 
+    const handleBackupAndWipe = async () => {
+        if (products.length === 0) {
+            setMessage({ text: "No stock products to delete.", type: "error" });
+            return;
+        }
+        if (
+            !window.confirm(
+                "This will download all stock data first and then PERMANENTLY DELETE all products in stock. Continue?",
+            )
+        ) {
+            return;
+        }
+
+        try {
+            exportAllProducts();
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            await api.delete("/products-all");
+            setMessage({
+                text: "Stock backed up and all products deleted!",
+                type: "success",
+            });
+            fetchProducts(true);
+            api.get("/stock-movements").then((r) => setLogs(r.data));
+        } catch (err) {
+            setMessage({
+                text:
+                    err.response?.data?.message || "Failed to delete all stock",
+                type: "error",
+            });
+        }
+    };
+
     const skuMatches =
         form.sku && !editingId
             ? products.filter(
@@ -185,7 +217,11 @@ export default function StockPage({ user }) {
         try {
             const fd = new FormData();
             Object.entries(form).forEach(([k, v]) => {
-                if (v !== null && v !== "") fd.append(k, v);
+                if (k === "image") {
+                    if (v) fd.append("image", v);
+                } else {
+                    fd.append(k, v ?? "");
+                }
             });
 
             if (editingId) {
@@ -227,8 +263,16 @@ export default function StockPage({ user }) {
 
     const handleDelete = async (id) => {
         if (!window.confirm("Delete this product?")) return;
-        await api.delete(`/products/${id}`);
-        fetchProducts(true);
+        try {
+            await api.delete(`/products/${id}`);
+            setMessage({ text: "Product deleted!", type: "success" });
+            fetchProducts(true);
+        } catch (err) {
+            setMessage({
+                text: err.response?.data?.message || "Delete failed",
+                type: "error",
+            });
+        }
     };
 
     const handleBulkUpload = async (e) => {
@@ -237,11 +281,14 @@ export default function StockPage({ user }) {
         try {
             const fd = new FormData();
             fd.append("file", file);
-            await api.post("/products/bulk-upload", fd, {
+            const res = await api.post("/products/bulk-upload", fd, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
             setFile(null);
-            setMessage({ text: "Bulk CSV/Excel imported!", type: "success" });
+            setMessage({
+                text: res.data.message || "Bulk CSV/Excel imported!",
+                type: "success",
+            });
             fetchProducts(true);
             fetchCategories(true);
         } catch (err) {
@@ -309,7 +356,7 @@ export default function StockPage({ user }) {
                             Stock Change Logs
                         </button>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <button
                             onClick={exportAllProducts}
                             className="px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5"
@@ -323,6 +370,13 @@ export default function StockPage({ user }) {
                         >
                             <Download className="w-3.5 h-3.5" /> Download Stock
                             Logs
+                        </button>
+                        <button
+                            onClick={handleBackupAndWipe}
+                            className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5"
+                        >
+                            <Trash2 className="w-3.5 h-3.5" /> Backup & Delete
+                            All Stock
                         </button>
                     </div>
                 </div>

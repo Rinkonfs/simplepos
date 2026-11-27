@@ -13,6 +13,7 @@ import {
     Calendar,
     Trash2,
     Plus,
+    CheckSquare,
 } from "lucide-react";
 import api from "../api/axios";
 import { useStore } from "../context/StoreContext";
@@ -20,10 +21,12 @@ import { useStore } from "../context/StoreContext";
 export default function OrdersPage({ user }) {
     const { t } = useTranslation();
     const navigate = useNavigate();
-    const { currency, products, fetchProducts } = useStore();
+    const { currency, products, fetchProducts, notify } = useStore();
     const sym = currency.currency_symbol;
+    const isStaff = user.role !== "customer";
 
     const [orders, setOrders] = useState([]);
+    const [selectedIds, setSelectedIds] = useState([]);
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [channelFilter, setChannelFilter] = useState("all");
@@ -56,7 +59,10 @@ export default function OrdersPage({ user }) {
             loadOrders();
             fetchProducts(true);
         } catch (err) {
-            alert(err.response?.data?.message || "Cannot cancel order");
+            notify(
+                err.response?.data?.message || "Cannot cancel order",
+                "error",
+            );
         }
     };
 
@@ -67,7 +73,10 @@ export default function OrdersPage({ user }) {
             loadOrders();
             fetchProducts(true);
         } catch (err) {
-            alert(err.response?.data?.message || "Cannot delete order");
+            notify(
+                err.response?.data?.message || "Cannot delete order",
+                "error",
+            );
         }
     };
 
@@ -106,7 +115,7 @@ export default function OrdersPage({ user }) {
 
     const removeItemFromEdit = (productId) => {
         if (editingOrder.items.length <= 1) {
-            alert("Order must have at least 1 product.");
+            notify("Order must have at least 1 product.", "error");
             return;
         }
         setEditingOrder({
@@ -133,7 +142,10 @@ export default function OrdersPage({ user }) {
             loadOrders();
             fetchProducts(true);
         } catch (err) {
-            alert(err.response?.data?.message || "Failed to update order");
+            notify(
+                err.response?.data?.message || "Failed to update order",
+                "error",
+            );
         }
     };
 
@@ -154,10 +166,25 @@ export default function OrdersPage({ user }) {
         return matchesSearch && matchesStatus && matchesChannel && matchesDate;
     });
 
+    const toggleSelect = (id) => {
+        setSelectedIds((prev) =>
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+        );
+    };
+
+    const selectAllAccepted = () => {
+        const acceptedIds = filtered
+            .filter((o) => o.status === "accepted")
+            .map((o) => o.id);
+        setSelectedIds(acceptedIds);
+    };
+
     const badge = (status) => {
         const map = {
             pending: "bg-amber-100 text-amber-700",
             accepted: "bg-blue-100 text-blue-700",
+            ready_for_delivery: "bg-purple-100 text-purple-700",
+            shipped: "bg-cyan-100 text-cyan-700",
             completed: "bg-emerald-100 text-emerald-700",
             rejected: "bg-red-100 text-red-700",
             cancelled: "bg-slate-200 text-slate-700",
@@ -167,40 +194,47 @@ export default function OrdersPage({ user }) {
 
     const formatPayment = (m) => (m || "cash").replace("_", " ").toUpperCase();
 
-    const printInvoice = (o) => {
+    const buildInvoiceHtml = (o) => {
         const rows = o.items
             .map(
                 (i) =>
                     `<tr><td>${i.product?.name} × ${i.quantity}</td><td style="text-align:right">${sym}${i.subtotal}</td></tr>`,
             )
             .join("");
-        const win = window.open("", "_blank", "width=400,height=600");
+        return `
+      <div class="invoice-page">
+        <h2>INVOICE</h2>
+        <p>${o.order_number}</p>
+        <p>${new Date(o.created_at).toLocaleString()}</p>
+        <p>Customer: ${o.customer_name || o.user?.name || "Walk-in"}</p>
+        ${o.delivery_type === "delivery" && o.shipping_address ? `<p>Address: ${o.shipping_address}</p>` : ""}
+        <p>Payment: ${formatPayment(o.payment_method)} (${(o.payment_status || "unpaid").toUpperCase()})</p>
+        <table>${rows}</table>
+        ${Number(o.discount_amount) > 0 ? `<div class="row"><span>Discount (${o.discount_code})</span><span>-${sym}${o.discount_amount}</span></div>` : ""}
+        ${Number(o.adjustment_amount) !== 0 ? `<div class="row"><span>Adjustment</span><span>${sym}${o.adjustment_amount}</span></div>` : ""}
+        <div class="total"><span>Total</span><span>${sym}${o.total_amount}</span></div>
+      </div>
+    `;
+    };
+
+    const printInvoices = (orderList) => {
+        if (!orderList.length) return;
+        const body = orderList.map(buildInvoiceHtml).join("");
+        const win = window.open("", "_blank", "width=450,height=650");
         win.document.write(`
-      <html>
-        <head>
-          <title>Invoice ${o.order_number}</title>
-          <style>
-            body { font-family: sans-serif; padding: 20px; font-size: 13px; }
-            h2 { text-align: center; margin-bottom: 4px; }
-            p { text-align: center; color: #555; margin: 2px 0; font-size: 12px; }
-            table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-            td { padding: 6px 0; border-bottom: 1px dashed #ddd; }
-            .total { font-weight: bold; font-size: 16px; border-top: 2px solid #000; padding-top: 8px; display: flex; justify-content: space-between; }
-          </style>
-        </head>
-        <body>
-          <h2>INVOICE</h2>
-          <p>${o.order_number}</p>
-          <p>${new Date(o.created_at).toLocaleString()}</p>
-          <p>Customer: ${o.customer_name || o.user?.name || "Walk-in"}</p>
-          <p>Payment: ${formatPayment(o.payment_method)} (${(o.payment_status || "unpaid").toUpperCase()})</p>
-          <table>${rows}</table>
-          ${Number(o.discount_amount) > 0 ? `<div style="display:flex;justify-content:space-between"><span>Discount (${o.discount_code})</span><span>-${sym}${o.discount_amount}</span></div>` : ""}
-          ${Number(o.adjustment_amount) !== 0 ? `<div style="display:flex;justify-content:space-between"><span>Adjustment</span><span>${sym}${o.adjustment_amount}</span></div>` : ""}
-          <div class="total"><span>Total</span><span>${sym}${o.total_amount}</span></div>
-          <script>window.onload = () => { window.print(); window.close(); }</script>
-        </body>
-      </html>
+      <html><head><title>Invoices</title>
+      <style>
+        body { font-family: sans-serif; margin: 0; font-size: 13px; }
+        .invoice-page { padding: 20px; page-break-after: always; }
+        .invoice-page:last-child { page-break-after: auto; }
+        h2 { text-align: center; margin-bottom: 4px; }
+        p { text-align: center; color: #555; margin: 2px 0; font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        td { padding: 6px 0; border-bottom: 1px dashed #ddd; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .total { font-weight: bold; font-size: 16px; border-top: 2px solid #000; padding-top: 8px; display: flex; justify-content: space-between; }
+      </style></head>
+      <body>${body}<script>window.onload=()=>{window.print();window.close()}</script></body></html>
     `);
         win.document.close();
     };
@@ -226,11 +260,48 @@ export default function OrdersPage({ user }) {
 
     return (
         <div className="space-y-4">
-            <h1 className="text-xl font-bold text-slate-900">
-                {user.role === "customer"
-                    ? t("my_orders")
-                    : t("order_management")}
-            </h1>
+            <div className="flex flex-wrap justify-between items-center gap-2">
+                <h1 className="text-xl font-bold text-slate-900">
+                    {user.role === "customer"
+                        ? t("my_orders")
+                        : t("order_management")}
+                </h1>
+
+                {isStaff && (
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={selectAllAccepted}
+                            className="px-3 py-2 bg-blue-50 text-blue-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 hover:bg-blue-100"
+                        >
+                            <CheckSquare className="w-3.5 h-3.5" /> Select All
+                            Accepted
+                        </button>
+                        {selectedIds.length > 0 && (
+                            <>
+                                <button
+                                    onClick={() =>
+                                        printInvoices(
+                                            orders.filter((o) =>
+                                                selectedIds.includes(o.id),
+                                            ),
+                                        )
+                                    }
+                                    className="px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 hover:bg-indigo-700"
+                                >
+                                    <Printer className="w-3.5 h-3.5" /> Print
+                                    Selected ({selectedIds.length})
+                                </button>
+                                <button
+                                    onClick={() => setSelectedIds([])}
+                                    className="px-3 py-2 border rounded-xl text-xs font-semibold"
+                                >
+                                    Clear
+                                </button>
+                            </>
+                        )}
+                    </div>
+                )}
+            </div>
 
             {/* Filters with Date Range */}
             <div className="bg-white p-4 rounded-2xl border grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
@@ -248,6 +319,10 @@ export default function OrdersPage({ user }) {
                     <option value="all">All Status</option>
                     <option value="pending">{t("pending")}</option>
                     <option value="accepted">{t("accepted")}</option>
+                    <option value="ready_for_delivery">
+                        Ready for Delivery
+                    </option>
+                    <option value="shipped">Shipped</option>
                     <option value="completed">{t("completed")}</option>
                     <option value="rejected">{t("rejected")}</option>
                     <option value="cancelled">Cancelled</option>
@@ -279,12 +354,11 @@ export default function OrdersPage({ user }) {
 
             <div className="space-y-3">
                 {filtered.map((o) => {
-                    const canEdit =
-                        user.role !== "customer" || o.status === "pending";
-                    const canDelete =
-                        user.role !== "customer" || o.status === "pending";
+                    const canEdit = isStaff || o.status === "pending";
+                    const canDelete = isStaff || o.status === "pending";
                     const canCancel =
-                        user.role === "customer" && o.status === "accepted";
+                        user.role === "customer" &&
+                        ["accepted", "ready_for_delivery"].includes(o.status);
 
                     return (
                         <div
@@ -292,20 +366,30 @@ export default function OrdersPage({ user }) {
                             className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3"
                         >
                             <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-3">
-                                <div>
-                                    <span className="font-bold text-indigo-600">
-                                        {o.order_number}
-                                    </span>
-                                    <span className="text-xs text-slate-500 ml-2">
-                                        {o.customer_name || o.user?.name} •{" "}
-                                        {o.channel.toUpperCase()} •{" "}
-                                        {formatPayment(o.payment_method)}
-                                    </span>
-                                    <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                                        <Calendar className="w-3 h-3" />{" "}
-                                        {new Date(
-                                            o.created_at,
-                                        ).toLocaleString()}
+                                <div className="flex items-start gap-2.5">
+                                    {isStaff && (
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedIds.includes(o.id)}
+                                            onChange={() => toggleSelect(o.id)}
+                                            className="mt-1 w-4 h-4 accent-indigo-600 cursor-pointer"
+                                        />
+                                    )}
+                                    <div>
+                                        <span className="font-bold text-indigo-600">
+                                            {o.order_number}
+                                        </span>
+                                        <span className="text-xs text-slate-500 ml-2">
+                                            {o.customer_name || o.user?.name} •{" "}
+                                            {o.channel.toUpperCase()} •{" "}
+                                            {formatPayment(o.payment_method)}
+                                        </span>
+                                        <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                                            <Calendar className="w-3 h-3" />{" "}
+                                            {new Date(
+                                                o.created_at,
+                                            ).toLocaleString()}
+                                        </div>
                                     </div>
                                 </div>
 
@@ -323,7 +407,7 @@ export default function OrdersPage({ user }) {
                                     <span
                                         className={`text-xs px-2.5 py-1 rounded-full font-semibold uppercase ${badge(o.status)}`}
                                     >
-                                        {o.status}
+                                        {o.status.replace(/_/g, " ")}
                                     </span>
                                 </div>
                             </div>
@@ -433,38 +517,72 @@ export default function OrdersPage({ user }) {
                                         </button>
                                     )}
 
-                                    {user.role !== "customer" &&
-                                        o.status === "pending" && (
-                                            <>
-                                                <button
-                                                    onClick={() =>
-                                                        updateStatus(
-                                                            o.id,
-                                                            "accepted",
-                                                        )
-                                                    }
-                                                    className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700"
-                                                >
-                                                    <Check className="w-3.5 h-3.5" />{" "}
-                                                    {t("accept")}
-                                                </button>
-                                                <button
-                                                    onClick={() =>
-                                                        updateStatus(
-                                                            o.id,
-                                                            "rejected",
-                                                        )
-                                                    }
-                                                    className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700"
-                                                >
-                                                    <X className="w-3.5 h-3.5" />{" "}
-                                                    {t("reject")}
-                                                </button>
-                                            </>
+                                    {isStaff && o.status === "pending" && (
+                                        <>
+                                            <button
+                                                onClick={() =>
+                                                    updateStatus(
+                                                        o.id,
+                                                        "accepted",
+                                                    )
+                                                }
+                                                className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700"
+                                            >
+                                                <Check className="w-3.5 h-3.5" />{" "}
+                                                {t("accept")}
+                                            </button>
+                                            <button
+                                                onClick={() =>
+                                                    updateStatus(
+                                                        o.id,
+                                                        "rejected",
+                                                    )
+                                                }
+                                                className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700"
+                                            >
+                                                <X className="w-3.5 h-3.5" />{" "}
+                                                {t("reject")}
+                                            </button>
+                                        </>
+                                    )}
+
+                                    {isStaff &&
+                                        o.status === "accepted" &&
+                                        o.delivery_type === "delivery" && (
+                                            <button
+                                                onClick={() =>
+                                                    updateStatus(
+                                                        o.id,
+                                                        "ready_for_delivery",
+                                                    )
+                                                }
+                                                className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700"
+                                            >
+                                                <Package className="w-3.5 h-3.5" />{" "}
+                                                Ready for Delivery
+                                            </button>
                                         )}
 
-                                    {user.role !== "customer" &&
-                                        o.status === "accepted" && (
+                                    {isStaff &&
+                                        o.status === "ready_for_delivery" && (
+                                            <button
+                                                onClick={() =>
+                                                    updateStatus(
+                                                        o.id,
+                                                        "shipped",
+                                                    )
+                                                }
+                                                className="flex items-center gap-1 px-3 py-1.5 bg-cyan-600 text-white rounded-lg text-xs font-semibold hover:bg-cyan-700"
+                                            >
+                                                <Truck className="w-3.5 h-3.5" />{" "}
+                                                Mark Shipped
+                                            </button>
+                                        )}
+
+                                    {isStaff &&
+                                        ((o.status === "accepted" &&
+                                            o.delivery_type !== "delivery") ||
+                                            o.status === "shipped") && (
                                             <button
                                                 onClick={() =>
                                                     updateStatus(
@@ -474,7 +592,7 @@ export default function OrdersPage({ user }) {
                                                 }
                                                 className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700"
                                             >
-                                                <Package className="w-3.5 h-3.5" />{" "}
+                                                <Check className="w-3.5 h-3.5" />{" "}
                                                 {t("mark_completed")}
                                             </button>
                                         )}
@@ -508,6 +626,10 @@ export default function OrdersPage({ user }) {
                         >
                             <option value="pending">Pending</option>
                             <option value="accepted">Accepted</option>
+                            <option value="ready_for_delivery">
+                                Ready for Delivery
+                            </option>
+                            <option value="shipped">Shipped</option>
                             <option value="completed">Completed</option>
                             <option value="rejected">Rejected</option>
                         </select>
@@ -580,7 +702,8 @@ export default function OrdersPage({ user }) {
                                     </span>
                                     <input
                                         type="number"
-                                        min="1"
+                                        step="0.01"
+                                        min="0.01"
                                         value={item.quantity}
                                         onChange={(e) => {
                                             const items = [
@@ -678,7 +801,7 @@ export default function OrdersPage({ user }) {
                         </div>
                         <div className="grid grid-cols-3 gap-2 pt-2">
                             <button
-                                onClick={() => printInvoice(invoiceOrder)}
+                                onClick={() => printInvoices([invoiceOrder])}
                                 className="py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1"
                             >
                                 <Printer className="w-3.5 h-3.5" /> Print

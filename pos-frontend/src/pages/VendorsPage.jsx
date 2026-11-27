@@ -18,7 +18,7 @@ import api from "../api/axios";
 import { useStore } from "../context/StoreContext";
 
 export default function VendorsPage() {
-    const { products, currency, fetchProducts } = useStore();
+    const { products, currency, fetchProducts, notify } = useStore();
     const sym = currency.currency_symbol;
 
     const [tab, setTab] = useState("vendors"); // 'vendors' | 'pos'
@@ -55,7 +55,6 @@ export default function VendorsPage() {
     });
     const [smsPo, setSmsPo] = useState(null);
 
-    // Calendar State
     const [calDate, setCalDate] = useState(new Date());
     const [selectedDay, setSelectedDay] = useState(null);
 
@@ -75,36 +74,51 @@ export default function VendorsPage() {
 
     const saveVendor = async (e) => {
         e.preventDefault();
-        if (editingVendorId) {
-            await api.put(`/vendors/${editingVendorId}`, vForm);
-            setEditingVendorId(null);
-        } else {
-            await api.post("/vendors", vForm);
+        try {
+            if (editingVendorId) {
+                await api.put(`/vendors/${editingVendorId}`, vForm);
+                setEditingVendorId(null);
+                notify("Vendor updated!", "success");
+            } else {
+                await api.post("/vendors", vForm);
+                notify("Vendor added!", "success");
+            }
+            setVForm({
+                name: "",
+                phone: "",
+                whatsapp_number: "",
+                email: "",
+                address: "",
+                bank_details: "",
+            });
+            load();
+        } catch (err) {
+            notify(
+                err.response?.data?.message || "Failed to save vendor",
+                "error",
+            );
         }
-        setVForm({
-            name: "",
-            phone: "",
-            whatsapp_number: "",
-            email: "",
-            address: "",
-            bank_details: "",
-        });
-        load();
     };
 
     const savePO = async (e) => {
         e.preventDefault();
-        if (editingPoId) {
-            await api.put(`/purchase-orders/${editingPoId}`, poForm);
-            setEditingPoId(null);
-        } else {
-            await api.post("/purchase-orders", poForm);
+        try {
+            if (editingPoId) {
+                await api.put(`/purchase-orders/${editingPoId}`, poForm);
+                setEditingPoId(null);
+                notify("Purchase Order updated!", "success");
+            } else {
+                await api.post("/purchase-orders", poForm);
+                notify("Purchase Order created!", "success");
+            }
+            setPoForm({
+                vendor_id: "",
+                items: [{ product_id: "", quantity: 1, cost_price: "" }],
+            });
+            load();
+        } catch (err) {
+            notify(err.response?.data?.message || "Failed to save PO", "error");
         }
-        setPoForm({
-            vendor_id: "",
-            items: [{ product_id: "", quantity: 1, cost_price: "" }],
-        });
-        load();
     };
 
     const startEditPO = (po) => {
@@ -118,6 +132,21 @@ export default function VendorsPage() {
             })),
         });
         window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
+    const deletePO = async (id) => {
+        if (!window.confirm("Delete this Purchase Order?")) return;
+        try {
+            await api.delete(`/purchase-orders/${id}`);
+            notify("Purchase Order deleted!", "success");
+            load();
+        } catch (err) {
+            notify(
+                err.response?.data?.message ||
+                    "Failed to delete Purchase Order",
+                "error",
+            );
+        }
     };
 
     const updatePOStatus = async (id, status) => {
@@ -134,9 +163,10 @@ export default function VendorsPage() {
                 amount: Number(payForm.amount),
             });
             setPayingPo(null);
+            notify("Payment recorded!", "success");
             load();
         } catch (err) {
-            alert(err.response?.data?.message || "Payment failed");
+            notify(err.response?.data?.message || "Payment failed", "error");
         }
     };
 
@@ -182,7 +212,7 @@ export default function VendorsPage() {
         const itemRows = po.items
             .map(
                 (i) =>
-                    `<tr><td>${i.product?.sku || "-"}</td><td>${i.product?.name}</td><td class="r">${i.quantity} ${i.product?.unit || ""}</td><td class="r">${sym}${i.cost_price}</td><td class="r">${sym}${i.subtotal}</td></tr>`,
+                    `<tr><td>${i.product?.sku || "-"}</td><td>${i.product?.name || "-"}</td><td class="r">${i.quantity} ${i.product?.unit || ""}</td><td class="r">${sym}${i.cost_price}</td><td class="r">${sym}${i.subtotal}</td></tr>`,
             )
             .join("");
         const payRows = (po.payments || []).length
@@ -199,11 +229,21 @@ export default function VendorsPage() {
         ).toFixed(2);
 
         const win = window.open("", "_blank", "width=900,height=1000");
+        if (!win) {
+            notify(
+                "Please allow pop-ups in your browser to print the A4 Invoice.",
+                "error",
+            );
+            return;
+        }
+
+        win.document.open();
         win.document.write(`
+      <!DOCTYPE html>
       <html><head><title>PO Invoice - ${po.po_number}</title>
       <style>
         @page { size: A4; margin: 15mm; }
-        body { font-family: Arial, sans-serif; color: #1e293b; font-size: 12px; line-height: 1.5; }
+        body { font-family: Arial, sans-serif; color: #1e293b; font-size: 12px; line-height: 1.5; padding: 20px; }
         .header { display: flex; justify-content: space-between; border-bottom: 2px solid #4f46e5; padding-bottom: 12px; margin-bottom: 18px; }
         h1 { margin: 0; color: #4f46e5; font-size: 22px; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
@@ -216,7 +256,7 @@ export default function VendorsPage() {
       </style></head><body>
       <div class="header">
         <div><h1>PURCHASE ORDER INVOICE</h1><div><strong>PO #:</strong> ${po.po_number}</div><div><strong>Date:</strong> ${new Date(po.created_at).toLocaleString()}</div><div><strong>Status:</strong> ${po.status.toUpperCase()}</div></div>
-        <div style="text-align:right"><strong>Vendor:</strong> ${po.vendor?.name}<br/>${po.vendor?.phone ? `Phone: ${po.vendor.phone}<br/>` : ""}${po.vendor?.email ? `Email: ${po.vendor.email}<br/>` : ""}${po.vendor?.address || ""}</div>
+        <div style="text-align:right"><strong>Vendor:</strong> ${po.vendor?.name || "-"}<br/>${po.vendor?.phone ? `Phone: ${po.vendor.phone}<br/>` : ""}${po.vendor?.email ? `Email: ${po.vendor.email}<br/>` : ""}${po.vendor?.address || ""}</div>
       </div>
       <h3>Order Items</h3>
       <table><thead><tr><th>SKU</th><th>Product</th><th class="r">Qty</th><th class="r">Unit Cost</th><th class="r">Subtotal</th></tr></thead><tbody>${itemRows}</tbody></table>
@@ -227,9 +267,14 @@ export default function VendorsPage() {
       </table>
       <h3>Payment History</h3>
       <table><thead><tr><th>Date & Time</th><th>Method</th><th>Reference</th><th>Note</th><th class="r">Amount</th></tr></thead><tbody>${payRows}</tbody></table>
-      <script>window.onload=()=>{window.print();window.close()}</script></body></html>
+      </body></html>
     `);
         win.document.close();
+
+        setTimeout(() => {
+            win.focus();
+            win.print();
+        }, 300);
     };
 
     const filteredPOs = posList.filter((po) => {
@@ -245,7 +290,6 @@ export default function VendorsPage() {
         return true;
     });
 
-    // Calendar helpers
     const year = calDate.getFullYear();
     const month = calDate.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -919,6 +963,13 @@ export default function VendorsPage() {
                                                     Edit
                                                 </button>
                                             )}
+                                            <button
+                                                onClick={() => deletePO(po.id)}
+                                                className="px-2.5 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs flex items-center gap-1 hover:bg-red-100"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />{" "}
+                                                Delete
+                                            </button>
                                             <button
                                                 onClick={() => sendEmailPO(po)}
                                                 className="px-2.5 py-1.5 bg-slate-100 rounded-lg text-xs flex items-center gap-1"
